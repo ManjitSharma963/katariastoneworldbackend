@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tax Invoice</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    margin: 30px;
+    color: #000;
+  }
+  .invoice-container {
+    border: 2px solid #000;
+    padding: 5px;
+	  position: relative; /* ✅ Needed for absolute positioning inside */
+	    min-height: 100vh;   /* makes sure it fills most of the page */
+
+	
+  }
+  .header {
+    font-weight: bold;
+    border-bottom: 2px solid #000;
+    padding: 10px 5px;
+    font-size: 16px;
+  }
+  .header-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .header-table td {
+    border: none;
+    padding: 5px;
+    vertical-align: middle;
+  }
+  .header-table td:first-child {
+    text-align: left;
+    width: 33%;
+  }
+  .header-table td:nth-child(2) {
+    text-align: center;
+    width: 34%;
+  }
+  .header-table td:last-child {
+    text-align: right;
+    width: 33%;
+  }
+  .header h2 {
+    margin: 5px 0;
+    text-transform: uppercase;
+  }
+  .sub-header {
+    background: #cce0ff;
+    text-align: center;
+    font-weight: bold;
+    border-bottom: 2px solid #000;
+    padding: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  td, th {
+    border: 1px solid #000;
+    padding: 6px;
+    vertical-align: top;
+  }
+  .bold { font-weight: bold; }
+  .no-border td {
+    border: none;
+    padding: 2px 0;
+  }
+  .text-center { text-align: center; }
+  .text-right { text-align: right; }
+  .highlight {
+    background: #dbe5ff;
+    font-weight: bold;
+  }
+  .bank-details, .declaration {
+    margin-top: 10px;
+    padding: 8px;
+  }
+  .bank-details table {
+    width: 50%;
+  }
+  .declaration{
+      width: 50%;
+      font-size: 11px;
+  }
+.signature {
+  border: 2px solid #000;
+  text-align: right;
+  font-weight: bold;
+  width: 35%;
+  height: 100px;
+  padding: 5px;
+  position: absolute;  /* ✅ Fix position inside invoice box */
+  bottom: 2px;        /* distance from bottom edge */
+  right: 2px;         /* distance from right edge */
+}
+
+  .footer-note {
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  .border {
+    border-collapse: collapse;
+  }
+  .border td {
+    border: 1px solid #000;
+    padding: 4px;
+  }
+</style>
+</head>
+<body>
+  <div class="invoice-container">
+
+<div class="header">
+  <table class="header-table">
+    <tr>
+      <td><strong>GSTIN:</strong> {{sellerGstin}}</td>
+      <td><strong>TAX INVOICE</strong></td>
+      <td><strong>MOB:</strong> {{sellerMobile}}</td>
+    </tr>
+  </table>
+</div>
+
+
+    <div class="sub-header">
+      {{subHeader}}
+    </div>
+
+    <table>
+      <tr>
+        <td width="50%">
+          <strong>SELLER</strong><br />
+          <strong>{{sellerName}}</strong><br />
+          {{sellerAddress}}
+        </td>
+        <td>
+  <!-- Sub Table 1: Invoice Details -->
+  <table class="border" width="100%">
+    <tr><td colspan="2"><b>Invoice Details</b></td></tr>
+    <tr><td><b>Invoice No.:</b></td><td>{{billNumber}}</td></tr>
+    <tr><td><b>Date:</b></td><td>{{billDate}}</td></tr>
+  </table>
+  <br />
+</td>
+      </tr>
+    </table>
+
+    <table>
+      <tr>
+        <td width="50%">
+          <strong>Buyer / Consignee</strong><br />
+          {{#if customerName}}<b>{{customerName}}</b><br />{{/if}}
+          {{#if address}}{{address}}<br />{{/if}}
+          {{#if gstin}}GSTIN : {{gstin}}{{/if}}
+        </td>
+        <td>
+          <b>BUYER IF OTHER THAN CONSIGNEE</b><br />
+          {{buyerIfOther}}
+        </td>
+      </tr>
+    </table>
+
+    <table>
+      <tr>
+        <td><b>Pre-Carriage by</b><br />{{preCarriageBy}}</td>
+        <td><b>Transport Name</b><br />{{transportName}}</td>
+        <td><b>State of Origin of Goods</b><br />{{stateOfOrigin}}</td>
+        <td><b>State of Final Destination</b><br />{{stateOfDestination}}</td>
+      </tr>
+      <tr>
+        <td><b>Truck No.</b><br />{{truckNo}}</td>
+        <td><b>Place of Supply</b><br />{{placeOfSupply}}</td>
+        <td><b>Terms of Delivery and Payment</b><br />{{termsOfDelivery}}</td>
+        <td><b>Port of Discharge</b><br />{{portOfDischarge}}</td>
+      </tr>
+    </table>
+
+    <table>
+      <tr class="highlight text-center">
+        <th>Sr. No.</th>
+        <th>HSN Code</th>
+        <th>DESCRIPTION OF GOODS</th>
+        <th>Quantity<br />In Sq. Feet.</th>
+        <th>RATE<br />Per Sq. Feet.</th>
+        <th>AMOUNT<br />In Rs.</th>
+      </tr>
+      {{#each items}}
+      <tr>
+        <td class="text-center">{{srNo}}</td>
+        <td class="text-center">{{hsnCode}}</td>
+        <td>{{itemName}}<br />{{itemDescription}}</td>
+        <td class="text-right">{{quantity}}</td>
+        <td class="text-right">{{pricePerUnit}}</td>
+        <td class="text-right">{{itemTotal}}</td>
+      </tr>
+      {{/each}}
+      <tr>
+        <td colspan="5" class="text-right bold">TOTAL</td>
+        <td class="text-right bold">{{subtotal}}</td>
+      </tr>
+      {{#if cgstAmount}}
+      <tr>
+        <td colspan="5" class="text-right bold">CGST @ 9%</td>
+        <td class="text-right bold">{{cgstAmount}}</td>
+      </tr>
+      <tr>
+        <td colspan="5" class="text-right bold">SGST @ 9%</td>
+        <td class="text-right bold">{{sgstAmount}}</td>
+      </tr>
+      {{/if}}
+      {{#if igstAmount}}
+      <tr>
+        <td colspan="5" class="text-right bold">IGST @ 18%</td>
+        <td class="text-right bold">{{igstAmount}}</td>
+      </tr>
+      {{/if}}
+      <tr>
+        <td colspan="5" class="text-right bold">GRAND TOTAL</td>
+        <td class="text-right bold">{{totalAmount}}</td>
+      </tr>
+    </table>
+
+    <div class="footer-note">
+      <b>Amount Chargeable in Rs.:</b> {{amountInWords}}
+    </div>
+
+    <div class="bank-details">
+      <b>Company Bank Details</b>
+      <table>
+        <tr><td><b>Bank Name:</b> {{bankName}}</td></tr>
+        <tr><td><b>A/c No.:</b> {{accountNumber}}</td></tr>
+        <tr><td><b>IFSC Code:</b> {{ifscCode}}</td></tr>
+      </table>
+    </div>
+
+    <div class="declaration">
+      <b>Terms &amp; Conditions:</b><br />
+      {{termsAndConditions}}
+	 </div>
+
+    <div class="signature">
+      <div>{{sellerName}}</div>
+      <div>Authorized Signatory</div>
+    </div>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,486 @@
+package com.katariastoneworld.apis.service;
+
+import com.katariastoneworld.apis.dto.BillItemDTO;
+import com.katariastoneworld.apis.dto.BillRequestDTO;
+import com.katariastoneworld.apis.dto.BillResponseDTO;
+import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.repository.BillGSTRepository;
+import com.katariastoneworld.apis.repository.BillNonGSTRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+@Service
+@Transactional
+public class BillService {
+    
+    @Autowired
+    private BillGSTRepository billGSTRepository;
+    
+    @Autowired
+    private BillNonGSTRepository billNonGSTRepository;
+    
+    @Autowired
+    private CustomerService customerService;
+    
+    @Autowired
+    private BillNumberGeneratorService billNumberGeneratorService;
+    
+    @Autowired
+    private ProductService productService;
+    
+    @Autowired
+    private EmailService emailService;
+    
+    public BillResponseDTO createBill(BillRequestDTO billRequestDTO) {
+        // Get or create customer with details
+        System.out.println("Creating bill: service" + billRequestDTO);
+        Customer customer = customerService.getOrCreateCustomer(
+                billRequestDTO.getCustomerMobileNumber(),
+                billRequestDTO.getCustomerName(),
+                billRequestDTO.getAddress(),
+                billRequestDTO.getGstin(),
+                billRequestDTO.getCustomerEmail()
+        );
+        
+        // Generate unique bill number
+        String billNumber = billNumberGeneratorService.generateUniqueBillNumber();
+        
+        // Calculate total sqft from items (quantity represents sqft)
+        BigDecimal totalSqft = billRequestDTO.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getQuantity()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        
+        // Calculate subtotal from items (pricePerUnit * quantity)
+        BigDecimal subtotal = billRequestDTO.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getPricePerUnit())
+                        .multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        
+        // Service charge (default to 0)
+        BigDecimal serviceCharge = BigDecimal.ZERO;
+        
+        // Discount amount
+        BigDecimal discountAmount = BigDecimal.valueOf(billRequestDTO.getDiscountAmount())
+                .setScale(2, RoundingMode.HALF_UP);
+        
+        // Determine if GST or NonGST based on tax percentage
+        BigDecimal taxPercentage = BigDecimal.valueOf(billRequestDTO.getTaxPercentage());
+        boolean isGST = taxPercentage.compareTo(BigDecimal.ZERO) > 0;
+        
+        if (isGST) {
+            return createGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal, 
+                    taxPercentage, serviceCharge, discountAmount);
+        } else {
+            return createNonGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal, 
+                    serviceCharge, discountAmount);
+        }
+    }
+    
+    private BillResponseDTO createGSTBill(BillRequestDTO billRequestDTO, Customer customer, 
+                                         String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
+                                         BigDecimal taxRate, BigDecimal serviceCharge, BigDecimal discountAmount) {
+        // Calculate tax amount
+        BigDecimal taxAmount = subtotal.multiply(taxRate)
+                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        
+        // Use provided totalAmount if available, otherwise calculate it
+        BigDecimal totalAmount;
+        if (billRequestDTO.getTotalAmount() != null) {
+            totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else {
+            // Calculate total amount
+            totalAmount = subtotal.add(taxAmount).add(serviceCharge).subtract(discountAmount);
+            if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+                totalAmount = BigDecimal.ZERO;
+            }
+            totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        }
+        
+        // Create GST Bill entity
+        BillGST bill = new BillGST();
+        bill.setBillNumber(billNumber);
+        bill.setCustomer(customer);
+        bill.setBillDate(LocalDate.now());
+        bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
+        bill.setSubtotal(subtotal);
+        bill.setTaxRate(taxRate);
+        bill.setTaxAmount(taxAmount);
+        bill.setServiceCharge(serviceCharge);
+        bill.setDiscountAmount(discountAmount);
+        bill.setTotalAmount(totalAmount);
+        bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
+        
+        // Group items by productId and sum quantities for efficient stock validation
+        Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
+        Map<String, BigDecimal> productQuantitiesByName = new HashMap<>();
+        
+        for (BillItemDTO itemDTO : billRequestDTO.getItems()) {
+            BigDecimal quantity = BigDecimal.valueOf(itemDTO.getQuantity())
+                    .setScale(2, RoundingMode.HALF_UP);
+            
+            if (itemDTO.getProductId() != null) {
+                // Group by productId if provided
+                productQuantitiesById.merge(itemDTO.getProductId(), quantity, BigDecimal::add);
+            } else if (itemDTO.getItemName() != null) {
+                // Group by product name if productId is not provided
+                productQuantitiesByName.merge(itemDTO.getItemName(), quantity, BigDecimal::add);
+            }
+        }
+        
+        // Validate stock availability for all products (by ID)
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.validateStockAvailability(entry.getKey(), entry.getValue());
+        }
+        
+        // Validate stock availability for all products (by name)
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.validateStockAvailabilityByName(entry.getKey(), entry.getValue());
+        }
+        
+        // Add items to bill
+        for (BillItemDTO itemDTO : billRequestDTO.getItems()) {
+            BillItemGST item = new BillItemGST();
+            item.setProductName(itemDTO.getItemName());
+            item.setProductType(itemDTO.getCategory());
+            item.setPricePerSqft(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .setScale(2, RoundingMode.HALF_UP));
+            item.setSqftOrdered(BigDecimal.valueOf(itemDTO.getQuantity())
+                    .setScale(2, RoundingMode.HALF_UP));
+            item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
+                    .setScale(2, RoundingMode.HALF_UP));
+            
+            if (itemDTO.getProductImageUrl() != null) {
+                item.setProductImageUrl(itemDTO.getProductImageUrl());
+            }
+            
+            // Link product if productId is provided, otherwise try to find by name
+            if (itemDTO.getProductId() != null) {
+                item.setProduct(productService.getProductEntityById(itemDTO.getProductId()));
+            } else if (itemDTO.getItemName() != null) {
+                try {
+                    item.setProduct(productService.getProductEntityByName(itemDTO.getItemName()));
+                } catch (RuntimeException e) {
+                    // Product not found by name - this is OK, item will be saved without product link
+                    // Stock deduction will still happen if product exists
+                }
+            }
+            
+            bill.addItem(item);
+        }
+        
+        // Save GST bill
+        BillGST savedBill = billGSTRepository.save(bill);
+        
+        // Deduct stock from products after bill is saved (grouped by productId)
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.deductStock(entry.getKey(), entry.getValue());
+        }
+        
+        // Deduct stock from products after bill is saved (grouped by product name)
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.deductStockByName(entry.getKey(), entry.getValue());
+        }
+        
+        // Convert to response DTO
+        BillResponseDTO responseDTO = convertGSTToResponseDTO(savedBill);
+        // Automatically set simpleBill to true if taxPercentage is 0, or use the flag from request
+        boolean isSimpleBill = (billRequestDTO.getSimpleBill() != null && billRequestDTO.getSimpleBill()) 
+                              || (billRequestDTO.getTaxPercentage() != null && billRequestDTO.getTaxPercentage() == 0);
+        responseDTO.setSimpleBill(isSimpleBill);
+        
+        // Send email to customer asynchronously (non-blocking)
+        emailService.sendBillEmail(responseDTO, customer.getEmail());
+        System.out.println("Bill created successfully. Email will be sent in background for bill: " + savedBill.getBillNumber());
+        
+        return responseDTO;
+    }
+    
+    private BillResponseDTO createNonGSTBill(BillRequestDTO billRequestDTO, Customer customer, 
+                                             String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
+                                             BigDecimal serviceCharge, BigDecimal discountAmount) {
+        // Use provided totalAmount if available, otherwise calculate it (no tax)
+        BigDecimal totalAmount;
+        if (billRequestDTO.getTotalAmount() != null) {
+            totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else {
+            // Calculate total amount (no tax)
+            totalAmount = subtotal.add(serviceCharge).subtract(discountAmount);
+            if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+                totalAmount = BigDecimal.ZERO;
+            }
+            totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        }
+        
+        // Create NonGST Bill entity
+        BillNonGST bill = new BillNonGST();
+        bill.setBillNumber(billNumber);
+        bill.setCustomer(customer);
+        bill.setBillDate(LocalDate.now());
+        bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
+        bill.setSubtotal(subtotal);
+        bill.setServiceCharge(serviceCharge);
+        bill.setDiscountAmount(discountAmount);
+        bill.setTotalAmount(totalAmount);
+        bill.setPaymentStatus(BillNonGST.PaymentStatus.PAID);
+        
+        // Group items by productId and sum quantities for efficient stock validation
+        Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
+        Map<String, BigDecimal> productQuantitiesByName = new HashMap<>();
+        
+        for (BillItemDTO itemDTO : billRequestDTO.getItems()) {
+            BigDecimal quantity = BigDecimal.valueOf(itemDTO.getQuantity())
+                    .setScale(2, RoundingMode.HALF_UP);
+            
+            if (itemDTO.getProductId() != null) {
+                // Group by productId if provided
+                productQuantitiesById.merge(itemDTO.getProductId(), quantity, BigDecimal::add);
+            } else if (itemDTO.getItemName() != null) {
+                // Group by product name if productId is not provided
+                productQuantitiesByName.merge(itemDTO.getItemName(), quantity, BigDecimal::add);
+            }
+        }
+        
+        // Validate stock availability for all products (by ID)
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.validateStockAvailability(entry.getKey(), entry.getValue());
+        }
+        
+        // Validate stock availability for all products (by name)
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.validateStockAvailabilityByName(entry.getKey(), entry.getValue());
+        }
+        
+        // Add items to bill
+        for (BillItemDTO itemDTO : billRequestDTO.getItems()) {
+            BillItemNonGST item = new BillItemNonGST();
+            item.setProductName(itemDTO.getItemName());
+            item.setProductType(itemDTO.getCategory());
+            item.setPricePerSqft(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .setScale(2, RoundingMode.HALF_UP));
+            item.setSqftOrdered(BigDecimal.valueOf(itemDTO.getQuantity())
+                    .setScale(2, RoundingMode.HALF_UP));
+            item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
+                    .setScale(2, RoundingMode.HALF_UP));
+            
+            if (itemDTO.getProductImageUrl() != null) {
+                item.setProductImageUrl(itemDTO.getProductImageUrl());
+            }
+            
+            // Link product if productId is provided, otherwise try to find by name
+            if (itemDTO.getProductId() != null) {
+                item.setProduct(productService.getProductEntityById(itemDTO.getProductId()));
+            } else if (itemDTO.getItemName() != null) {
+                try {
+                    item.setProduct(productService.getProductEntityByName(itemDTO.getItemName()));
+                } catch (RuntimeException e) {
+                    // Product not found by name - this is OK, item will be saved without product link
+                    // Stock deduction will still happen if product exists
+                }
+            }
+            
+            bill.addItem(item);
+        }
+        
+        // Save NonGST bill
+        BillNonGST savedBill = billNonGSTRepository.save(bill);
+        
+        // Deduct stock from products after bill is saved (grouped by productId)
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.deductStock(entry.getKey(), entry.getValue());
+        }
+        
+        // Deduct stock from products after bill is saved (grouped by product name)
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.deductStockByName(entry.getKey(), entry.getValue());
+        }
+        
+        // Convert to response DTO
+        BillResponseDTO responseDTO = convertNonGSTToResponseDTO(savedBill);
+        // Automatically set simpleBill to true if taxPercentage is 0, or use the flag from request
+        boolean isSimpleBill = (billRequestDTO.getSimpleBill() != null && billRequestDTO.getSimpleBill()) 
+                              || (billRequestDTO.getTaxPercentage() != null && billRequestDTO.getTaxPercentage() == 0);
+        responseDTO.setSimpleBill(isSimpleBill);
+        
+        // Send email to customer asynchronously (non-blocking)
+        emailService.sendBillEmail(responseDTO, customer.getEmail());
+        System.out.println("Bill created successfully. Email will be sent in background for bill: " + savedBill.getBillNumber());
+        
+        return responseDTO;
+    }
+    
+    public BillResponseDTO getBillById(Long id, String billType) {
+        if ("GST".equalsIgnoreCase(billType)) {
+            BillGST bill = billGSTRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + id));
+            return convertGSTToResponseDTO(bill);
+        } else {
+            BillNonGST bill = billNonGSTRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + id));
+            return convertNonGSTToResponseDTO(bill);
+        }
+    }
+    
+    public BillResponseDTO getBillByBillNumber(String billNumber) {
+        // Check GST bills first
+        BillGST gstBill = billGSTRepository.findByBillNumber(billNumber).orElse(null);
+        if (gstBill != null) {
+            return convertGSTToResponseDTO(gstBill);
+        }
+        
+        // Check NonGST bills
+        BillNonGST nonGstBill = billNonGSTRepository.findByBillNumber(billNumber).orElse(null);
+        if (nonGstBill != null) {
+            return convertNonGSTToResponseDTO(nonGstBill);
+        }
+        
+        throw new RuntimeException("Bill not found with bill number: " + billNumber);
+    }
+    
+    public List<BillResponseDTO> getAllBills() {
+        // Combine both GST and NonGST bills, sorted by bill date (most recent first)
+        List<BillResponseDTO> gstBills = billGSTRepository.findAll().stream()
+                .map(this::convertGSTToResponseDTO)
+                .collect(Collectors.toList());
+        
+        List<BillResponseDTO> nonGstBills = billNonGSTRepository.findAll().stream()
+                .map(this::convertNonGSTToResponseDTO)
+                .collect(Collectors.toList());
+        
+        return Stream.concat(gstBills.stream(), nonGstBills.stream())
+                .sorted((a, b) -> {
+                    // Sort by bill date descending (most recent first), then by created date
+                    int dateCompare = b.getBillDate().compareTo(a.getBillDate());
+                    if (dateCompare != 0) {
+                        return dateCompare;
+                    }
+                    return b.getCreatedAt().compareTo(a.getCreatedAt());
+                })
+                .collect(Collectors.toList());
+    }
+    
+    public List<BillResponseDTO> getAllSales() {
+        // Same as getAllBills but with a dedicated method name for sales
+        return getAllBills();
+    }
+    
+    public List<BillResponseDTO> getBillsByMobileNumber(String mobileNumber) {
+        Customer customer = customerService.getCustomerByPhone(mobileNumber);
+        
+        // Combine both GST and NonGST bills for the customer
+        List<BillResponseDTO> gstBills = billGSTRepository.findByCustomer(customer).stream()
+                .map(this::convertGSTToResponseDTO)
+                .collect(Collectors.toList());
+        
+        List<BillResponseDTO> nonGstBills = billNonGSTRepository.findByCustomer(customer).stream()
+                .map(this::convertNonGSTToResponseDTO)
+                .collect(Collectors.toList());
+        
+        return Stream.concat(gstBills.stream(), nonGstBills.stream())
+                .collect(Collectors.toList());
+    }
+    
+    private BillResponseDTO convertGSTToResponseDTO(BillGST bill) {
+        BillResponseDTO responseDTO = new BillResponseDTO();
+        responseDTO.setId(bill.getId());
+        responseDTO.setBillNumber(bill.getBillNumber());
+        responseDTO.setBillType("GST");
+        responseDTO.setCustomerMobileNumber(bill.getCustomer().getPhone());
+        responseDTO.setCustomerId(bill.getCustomer().getId());
+        responseDTO.setCustomerName(bill.getCustomer().getCustomerName());
+        responseDTO.setAddress(bill.getCustomer().getAddress());
+        responseDTO.setGstin(bill.getCustomer().getGstin());
+        responseDTO.setCustomerEmail(bill.getCustomer().getEmail());
+        responseDTO.setBillDate(bill.getBillDate());
+        responseDTO.setTotalSqft(bill.getTotalSqft().doubleValue());
+        responseDTO.setSubtotal(bill.getSubtotal().doubleValue());
+        responseDTO.setTaxPercentage(bill.getTaxRate().doubleValue());
+        responseDTO.setTaxAmount(bill.getTaxAmount().doubleValue());
+        responseDTO.setServiceCharge(bill.getServiceCharge().doubleValue());
+        responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
+        responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
+        responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
+        responseDTO.setPaymentMethod(bill.getPaymentMethod());
+        responseDTO.setNotes(bill.getNotes());
+        responseDTO.setCreatedAt(bill.getCreatedAt());
+        
+        // Convert items
+        List<BillItemDTO> itemDTOs = bill.getItems().stream()
+                .map(item -> {
+                    BillItemDTO itemDTO = new BillItemDTO();
+                    itemDTO.setItemName(item.getProductName());
+                    itemDTO.setCategory(item.getProductType());
+                    itemDTO.setPricePerUnit(item.getPricePerSqft().doubleValue());
+                    itemDTO.setQuantity(item.getSqftOrdered().intValue());
+                    itemDTO.setProductImageUrl(item.getProductImageUrl());
+                    if (item.getProduct() != null) {
+                        itemDTO.setProductId(item.getProduct().getId());
+                    }
+                    return itemDTO;
+                })
+                .collect(Collectors.toList());
+        
+        responseDTO.setItems(itemDTOs);
+        
+        return responseDTO;
+    }
+    
+    private BillResponseDTO convertNonGSTToResponseDTO(BillNonGST bill) {
+        BillResponseDTO responseDTO = new BillResponseDTO();
+        responseDTO.setId(bill.getId());
+        responseDTO.setBillNumber(bill.getBillNumber());
+        responseDTO.setBillType("NON_GST");
+        responseDTO.setCustomerMobileNumber(bill.getCustomer().getPhone());
+        responseDTO.setCustomerId(bill.getCustomer().getId());
+        responseDTO.setCustomerName(bill.getCustomer().getCustomerName());
+        responseDTO.setAddress(bill.getCustomer().getAddress());
+        responseDTO.setGstin(bill.getCustomer().getGstin());
+        responseDTO.setCustomerEmail(bill.getCustomer().getEmail());
+        responseDTO.setBillDate(bill.getBillDate());
+        responseDTO.setTotalSqft(bill.getTotalSqft().doubleValue());
+        responseDTO.setSubtotal(bill.getSubtotal().doubleValue());
+        responseDTO.setTaxPercentage(0.0);
+        responseDTO.setTaxAmount(0.0);
+        responseDTO.setServiceCharge(bill.getServiceCharge().doubleValue());
+        responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
+        responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
+        responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
+        responseDTO.setPaymentMethod(bill.getPaymentMethod());
+        responseDTO.setNotes(bill.getNotes());
+        responseDTO.setCreatedAt(bill.getCreatedAt());
+        
+        // Convert items
+        List<BillItemDTO> itemDTOs = bill.getItems().stream()
+                .map(item -> {
+                    BillItemDTO itemDTO = new BillItemDTO();
+                    itemDTO.setItemName(item.getProductName());
+                    itemDTO.setCategory(item.getProductType());
+                    itemDTO.setPricePerUnit(item.getPricePerSqft().doubleValue());
+                    itemDTO.setQuantity(item.getSqftOrdered().intValue());
+                    itemDTO.setProductImageUrl(item.getProductImageUrl());
+                    if (item.getProduct() != null) {
+                        itemDTO.setProductId(item.getProduct().getId());
+                    }
+                    return itemDTO;
+                })
+                .collect(Collectors.toList());
+        
+        responseDTO.setItems(itemDTOs);
+        
+        return responseDTO;
+    }
+}

@@ -1,0 +1,15 @@
+{
+  "customerMobileNumber": "9876543210",
+  "items": [
+    {
+      "itemName": "Absolute Black Granite",
+      "category": "Granite",
+      "pricePerUnit": 180.0,
+      "quantity": 1
+    }
+  ],
+  "taxPercentage": 10.0,
+  "discountAmount": 40.0,
+  "totalAmount": 158.0
+}
+
