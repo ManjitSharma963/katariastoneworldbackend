@@ -20,10 +20,10 @@ public class ProductService {
     @Autowired
     private ProductRepository productRepository;
     
-    public ProductResponseDTO createProduct(ProductRequestDTO productRequestDTO) {
-        // Check if slug already exists
-        if (productRepository.existsBySlug(productRequestDTO.getSlug())) {
-            throw new RuntimeException("Product with slug '" + productRequestDTO.getSlug() + "' already exists");
+    public ProductResponseDTO createProduct(ProductRequestDTO productRequestDTO, String location) {
+        // Check if slug already exists for this location
+        if (productRepository.existsBySlugAndLocation(productRequestDTO.getSlug(), location)) {
+            throw new RuntimeException("Product with slug '" + productRequestDTO.getSlug() + "' already exists for location: " + location);
         }
         
         // Create Product entity
@@ -57,6 +57,9 @@ public class ProductService {
             product.setMetaKeywords(productRequestDTO.getMetaKeywords());
         }
         
+        // Set location
+        product.setLocation(location);
+        
         // Save product
         Product savedProduct = productRepository.save(product);
         
@@ -64,22 +67,87 @@ public class ProductService {
         return convertToResponseDTO(savedProduct);
     }
     
-    public ProductResponseDTO getProductById(Long id) {
+    public ProductResponseDTO getProductById(Long id, String location) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
+        
+        // Verify location matches
+        if (!location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + id);
+        }
+        
         return convertToResponseDTO(product);
     }
     
-    public ProductResponseDTO getProductBySlug(String slug) {
-        Product product = productRepository.findBySlug(slug)
-                .orElseThrow(() -> new RuntimeException("Product not found with slug: " + slug));
+    public ProductResponseDTO getProductBySlug(String slug, String location) {
+        Product product = productRepository.findBySlugAndLocation(slug, location)
+                .orElseThrow(() -> new RuntimeException("Product not found with slug: " + slug + " for location: " + location));
         return convertToResponseDTO(product);
     }
     
-    public List<ProductResponseDTO> getAllProducts() {
-        return productRepository.findAll().stream()
+    public List<ProductResponseDTO> getAllProducts(String location) {
+        return productRepository.findByLocation(location).stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
+    }
+    
+    public ProductResponseDTO updateProduct(Long id, ProductRequestDTO productRequestDTO, String location) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
+        
+        // Verify location matches
+        if (!location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + id);
+        }
+        
+        // Check if slug is being changed and if new slug already exists for this location
+        if (!product.getSlug().equals(productRequestDTO.getSlug()) && 
+            productRepository.existsBySlugAndLocation(productRequestDTO.getSlug(), location)) {
+            throw new RuntimeException("Product with slug '" + productRequestDTO.getSlug() + "' already exists for location: " + location);
+        }
+        
+        product.setName(productRequestDTO.getName());
+        product.setSlug(productRequestDTO.getSlug());
+        product.setProductType(productRequestDTO.getProductType());
+        product.setPricePerSqft(BigDecimal.valueOf(productRequestDTO.getPricePerSqft())
+                .setScale(2, RoundingMode.HALF_UP));
+        product.setTotalSqftStock(BigDecimal.valueOf(productRequestDTO.getTotalSqftStock())
+                .setScale(2, RoundingMode.HALF_UP));
+        product.setPrimaryImageUrl(productRequestDTO.getPrimaryImageUrl());
+        
+        if (productRequestDTO.getColor() != null) {
+            product.setColor(productRequestDTO.getColor());
+        }
+        if (productRequestDTO.getDescription() != null) {
+            product.setDescription(productRequestDTO.getDescription());
+        }
+        if (productRequestDTO.getCategoryId() != null) {
+            product.setCategoryId(productRequestDTO.getCategoryId());
+        }
+        if (productRequestDTO.getIsFeatured() != null) {
+            product.setIsFeatured(productRequestDTO.getIsFeatured());
+        }
+        if (productRequestDTO.getIsActive() != null) {
+            product.setIsActive(productRequestDTO.getIsActive());
+        }
+        if (productRequestDTO.getMetaKeywords() != null) {
+            product.setMetaKeywords(productRequestDTO.getMetaKeywords());
+        }
+        
+        Product updatedProduct = productRepository.save(product);
+        return convertToResponseDTO(updatedProduct);
+    }
+    
+    public void deleteProduct(Long id, String location) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
+        
+        // Verify location matches
+        if (!location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + id);
+        }
+        
+        productRepository.deleteById(id);
     }
     
     /**

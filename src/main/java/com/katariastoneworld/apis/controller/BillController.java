@@ -1,12 +1,18 @@
 package com.katariastoneworld.apis.controller;
 
+import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
 import com.katariastoneworld.apis.service.BillService;
 import com.katariastoneworld.apis.service.EmailService;
+import com.katariastoneworld.apis.service.PdfService;
+import com.katariastoneworld.apis.util.RequestUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,44 +28,77 @@ public class BillController {
     @Autowired
     private EmailService emailService;
     
+    @Autowired
+    private PdfService pdfService;
+    
     @PostMapping
-    public ResponseEntity<BillResponseDTO> createBill(@Valid @RequestBody BillRequestDTO billRequestDTO) {
-      System.out.println("Creating bill: " + billRequestDTO);
-        BillResponseDTO response = billService.createBill(billRequestDTO);
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<BillResponseDTO> createBill(@Valid @RequestBody BillRequestDTO billRequestDTO, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        System.out.println("Creating bill: " + billRequestDTO);
+        BillResponseDTO response = billService.createBill(billRequestDTO, location);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
     
     @GetMapping("/number/{billNumber}")
-    public ResponseEntity<BillResponseDTO> getBillByBillNumber(@PathVariable String billNumber) {
-        BillResponseDTO response = billService.getBillByBillNumber(billNumber);
+    @RequiresRole("admin")
+    public ResponseEntity<BillResponseDTO> getBillByBillNumber(@PathVariable String billNumber, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        BillResponseDTO response = billService.getBillByBillNumber(billNumber, location);
         return ResponseEntity.ok(response);
     }
     
     @GetMapping("/{billType}/{id}")
-    public ResponseEntity<BillResponseDTO> getBillById(@PathVariable String billType, @PathVariable Long id) {
-        BillResponseDTO response = billService.getBillById(id, billType);
+    @RequiresRole("admin")
+    public ResponseEntity<BillResponseDTO> getBillById(@PathVariable String billType, @PathVariable Long id, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        BillResponseDTO response = billService.getBillById(id, billType, location);
         return ResponseEntity.ok(response);
     }
     
+    @GetMapping("/{id}")
+    @RequiresRole("admin")
+    public ResponseEntity<BillResponseDTO> getBillByIdSimple(@PathVariable Long id, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        // Try to find in GST bills first, then Non-GST
+        try {
+            BillResponseDTO response = billService.getBillById(id, "gst", location);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            try {
+                BillResponseDTO response = billService.getBillById(id, "nongst", location);
+                return ResponseEntity.ok(response);
+            } catch (Exception ex) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+            }
+        }
+    }
+    
     @GetMapping
-    public ResponseEntity<List<BillResponseDTO>> getAllBills() {
-        List<BillResponseDTO> bills = billService.getAllBills();
+    @RequiresRole("admin")
+    public ResponseEntity<List<BillResponseDTO>> getAllBills(HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        List<BillResponseDTO> bills = billService.getAllBills(location);
         return ResponseEntity.ok(bills);
     }
     
     @GetMapping("/sales")
-    public ResponseEntity<List<BillResponseDTO>> getAllSales() {
-        List<BillResponseDTO> sales = billService.getAllSales();
+    @RequiresRole("admin")
+    public ResponseEntity<List<BillResponseDTO>> getAllSales(HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        List<BillResponseDTO> sales = billService.getAllSales(location);
         return ResponseEntity.ok(sales);
     }
     
     @GetMapping("/customer/{mobileNumber}")
+    @RequiresRole("admin")
     public ResponseEntity<List<BillResponseDTO>> getBillsByMobileNumber(@PathVariable String mobileNumber) {
         List<BillResponseDTO> bills = billService.getBillsByMobileNumber(mobileNumber);
         return ResponseEntity.ok(bills);
     }
     
     @PostMapping("/test-email")
+    @RequiresRole("admin")
     public ResponseEntity<String> sendTestEmail(@RequestParam(required = false, defaultValue = "manjitsharma963@gmail.com") String email) {
         try {
             emailService.sendTestEmail(email);
@@ -67,6 +106,113 @@ public class BillController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Failed to send test email: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Download bill PDF by bill number
+     * GET /api/bills/number/{billNumber}/download
+     */
+    @GetMapping("/number/{billNumber}/download")
+    @RequiresRole("admin")
+    public ResponseEntity<byte[]> downloadBillByNumber(@PathVariable String billNumber, HttpServletRequest request) {
+        try {
+            String location = RequestUtil.getLocationFromRequest(request);
+            BillResponseDTO bill = billService.getBillByBillNumber(billNumber, location);
+            byte[] pdfBytes = generatePdfBytes(bill);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", "Bill_" + billNumber + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    /**
+     * Download GST bill PDF by ID
+     * GET /api/bills/gst/{id}/download
+     */
+    @GetMapping("/gst/{id}/download")
+    @RequiresRole("admin")
+    public ResponseEntity<byte[]> downloadGSTBillById(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            String location = RequestUtil.getLocationFromRequest(request);
+            BillResponseDTO bill = billService.getBillById(id, "gst", location);
+            byte[] pdfBytes = generatePdfBytes(bill);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", "Bill_" + bill.getBillNumber() + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    /**
+     * Download Non-GST bill PDF by ID
+     * GET /api/bills/nongst/{id}/download
+     */
+    @GetMapping("/nongst/{id}/download")
+    @RequiresRole("admin")
+    public ResponseEntity<byte[]> downloadNonGSTBillById(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            String location = RequestUtil.getLocationFromRequest(request);
+            BillResponseDTO bill = billService.getBillById(id, "nongst", location);
+            byte[] pdfBytes = generatePdfBytes(bill);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", "Bill_" + bill.getBillNumber() + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    /**
+     * Download bill PDF by ID and type (gst or nongst) - Generic endpoint
+     * GET /api/bills/{billType}/{id}/download
+     */
+    @GetMapping("/{billType}/{id}/download")
+    @RequiresRole("admin")
+    public ResponseEntity<byte[]> downloadBillById(@PathVariable String billType, @PathVariable Long id, HttpServletRequest request) {
+        try {
+            String location = RequestUtil.getLocationFromRequest(request);
+            BillResponseDTO bill = billService.getBillById(id, billType, location);
+            byte[] pdfBytes = generatePdfBytes(bill);
+            
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            headers.setContentDispositionFormData("attachment", "Bill_" + bill.getBillNumber() + ".pdf");
+            headers.setContentLength(pdfBytes.length);
+            
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+    
+    /**
+     * Helper method to generate PDF bytes based on bill type
+     */
+    private byte[] generatePdfBytes(BillResponseDTO bill) throws Exception {
+        // Check if this is a simple bill (no GST, no seller details)
+        boolean isSimpleBill = (bill.getSimpleBill() != null && bill.getSimpleBill()) 
+                            || (bill.getTaxPercentage() != null && bill.getTaxPercentage() == 0);
+        
+        if (isSimpleBill) {
+            return pdfService.generateSimpleBillPdf(bill);
+        } else {
+            return pdfService.generateBillPdf(bill);
         }
     }
 }

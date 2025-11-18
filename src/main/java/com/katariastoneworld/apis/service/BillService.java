@@ -41,7 +41,7 @@ public class BillService {
     @Autowired
     private EmailService emailService;
     
-    public BillResponseDTO createBill(BillRequestDTO billRequestDTO) {
+    public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location) {
         // Get or create customer with details
         System.out.println("Creating bill: service" + billRequestDTO);
         Customer customer = customerService.getOrCreateCustomer(
@@ -49,7 +49,8 @@ public class BillService {
                 billRequestDTO.getCustomerName(),
                 billRequestDTO.getAddress(),
                 billRequestDTO.getGstin(),
-                billRequestDTO.getCustomerEmail()
+                billRequestDTO.getCustomerEmail(),
+                location
         );
         
         // Generate unique bill number
@@ -323,27 +324,35 @@ public class BillService {
         return responseDTO;
     }
     
-    public BillResponseDTO getBillById(Long id, String billType) {
-        if ("GST".equalsIgnoreCase(billType)) {
+    public BillResponseDTO getBillById(Long id, String billType, String location) {
+        if ("GST".equalsIgnoreCase(billType) || "gst".equalsIgnoreCase(billType)) {
             BillGST bill = billGSTRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + id));
+            // Verify location matches
+            if (!location.equals(bill.getCustomer().getLocation())) {
+                throw new RuntimeException("GST Bill not found with id: " + id);
+            }
             return convertGSTToResponseDTO(bill);
         } else {
             BillNonGST bill = billNonGSTRepository.findById(id)
                     .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + id));
+            // Verify location matches
+            if (!location.equals(bill.getCustomer().getLocation())) {
+                throw new RuntimeException("NonGST Bill not found with id: " + id);
+            }
             return convertNonGSTToResponseDTO(bill);
         }
     }
     
-    public BillResponseDTO getBillByBillNumber(String billNumber) {
+    public BillResponseDTO getBillByBillNumber(String billNumber, String location) {
         // Check GST bills first
-        BillGST gstBill = billGSTRepository.findByBillNumber(billNumber).orElse(null);
+        BillGST gstBill = billGSTRepository.findByBillNumberAndCustomerLocation(billNumber, location).orElse(null);
         if (gstBill != null) {
             return convertGSTToResponseDTO(gstBill);
         }
         
         // Check NonGST bills
-        BillNonGST nonGstBill = billNonGSTRepository.findByBillNumber(billNumber).orElse(null);
+        BillNonGST nonGstBill = billNonGSTRepository.findByBillNumberAndCustomerLocation(billNumber, location).orElse(null);
         if (nonGstBill != null) {
             return convertNonGSTToResponseDTO(nonGstBill);
         }
@@ -351,13 +360,13 @@ public class BillService {
         throw new RuntimeException("Bill not found with bill number: " + billNumber);
     }
     
-    public List<BillResponseDTO> getAllBills() {
-        // Combine both GST and NonGST bills, sorted by bill date (most recent first)
-        List<BillResponseDTO> gstBills = billGSTRepository.findAll().stream()
+    public List<BillResponseDTO> getAllBills(String location) {
+        // Combine both GST and NonGST bills for the location, sorted by bill date (most recent first)
+        List<BillResponseDTO> gstBills = billGSTRepository.findByCustomerLocation(location).stream()
                 .map(this::convertGSTToResponseDTO)
                 .collect(Collectors.toList());
         
-        List<BillResponseDTO> nonGstBills = billNonGSTRepository.findAll().stream()
+        List<BillResponseDTO> nonGstBills = billNonGSTRepository.findByCustomerLocation(location).stream()
                 .map(this::convertNonGSTToResponseDTO)
                 .collect(Collectors.toList());
         
@@ -373,9 +382,9 @@ public class BillService {
                 .collect(Collectors.toList());
     }
     
-    public List<BillResponseDTO> getAllSales() {
+    public List<BillResponseDTO> getAllSales(String location) {
         // Same as getAllBills but with a dedicated method name for sales
-        return getAllBills();
+        return getAllBills(location);
     }
     
     public List<BillResponseDTO> getBillsByMobileNumber(String mobileNumber) {

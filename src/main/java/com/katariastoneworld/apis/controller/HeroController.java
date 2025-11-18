@@ -10,7 +10,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping({"/api/heroes", "/heroes"})
-@CrossOrigin(origins = {"http://localhost:3001", "http://localhost:3000"}, allowedHeaders = "*", methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS, RequestMethod.PATCH}, maxAge = 3600)
 public class HeroController {
     
     @Autowired

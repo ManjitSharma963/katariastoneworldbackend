@@ -34,8 +34,15 @@ public class GlobalExceptionHandler {
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
         
+        // Handle /auth/** paths - redirect to /api/auth/**
+        if (resourcePath.startsWith("/auth/")) {
+            String apiPath = resourcePath.replaceFirst("^/auth", "/api/auth");
+            error.put("error", "Endpoint not found: " + resourcePath);
+            error.put("message", "Please use the correct API path: " + apiPath);
+            error.put("suggestion", "Use /api/auth/register, /api/auth/login, or /api/auth/me instead");
+        } 
         // Provide helpful message for API endpoints
-        if (resourcePath.startsWith("/api/") || resourcePath.startsWith("/inventory") || 
+        else if (resourcePath.startsWith("/api/") || resourcePath.startsWith("/inventory") || 
             resourcePath.startsWith("/bills") || resourcePath.startsWith("/heroes")) {
             error.put("error", "API endpoint not found: " + resourcePath + ". Please check the endpoint URL.");
             error.put("message", "Make sure you're calling the correct API endpoint. Available endpoints: /api/inventory, /api/bills, /api/heroes");

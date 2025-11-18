@@ -24,7 +24,10 @@ public class Customer {
     @Column(nullable = false, unique = true, length = 20)
     private String phone;
     
-    @Column(length = 200)
+    @Column(name = "name", length = 200)
+    private String name;
+    
+    @Column(name = "customer_name", length = 200)
     private String customerName;
     
     @Column(columnDefinition = "TEXT")
@@ -35,6 +38,9 @@ public class Customer {
     
     @Column(length = 100)
     private String email;
+    
+    @Column(length = 50)
+    private String location; // Bhondsi or Tapugada - optional, can be set when creating customer
     
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

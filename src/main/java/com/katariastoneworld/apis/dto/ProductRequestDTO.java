@@ -73,4 +73,6 @@ public class ProductRequestDTO {
     
     @JsonAlias({"meta_keywords", "metaKeywords"})
     private String metaKeywords;
+    
+    // Location will be set from JWT token, not from request
 }

@@ -68,6 +68,10 @@ public class Product {
     @Column(length = 500)
     private String metaKeywords;
     
+    @NotBlank(message = "Location is required")
+    @Column(nullable = false, length = 50)
+    private String location; // Bhondsi or Tapugada
+    
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
     
