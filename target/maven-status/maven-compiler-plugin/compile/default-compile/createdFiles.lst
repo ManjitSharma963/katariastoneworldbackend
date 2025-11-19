@@ -12,6 +12,7 @@ com\katariastoneworld\apis\entity\BillNonGST$PaymentStatus.class
 com\katariastoneworld\apis\repository\BillGSTRepository.class
 com\katariastoneworld\apis\config\CorsConfig.class
 com\katariastoneworld\apis\dto\DoubleDeserializer.class
+com\katariastoneworld\apis\entity\Category.class
 com\katariastoneworld\apis\entity\Inquiry$InquiryStatus.class
 com\katariastoneworld\apis\entity\Bill$PaymentStatus.class
 com\katariastoneworld\apis\entity\Product$ProductType.class
@@ -29,9 +30,11 @@ com\katariastoneworld\apis\dto\CustomerRequestDTO.class
 com\katariastoneworld\apis\config\JwtAuthenticationFilter.class
 com\katariastoneworld\apis\entity\Customer.class
 com\katariastoneworld\apis\controller\AuthController$ErrorResponse.class
+com\katariastoneworld\apis\service\CategoryService.class
 com\katariastoneworld\apis\repository\CustomerRepository.class
 com\katariastoneworld\apis\service\EmployeeService.class
 com\katariastoneworld\apis\service\ProductService.class
+com\katariastoneworld\apis\controller\CategoryController.class
 com\katariastoneworld\apis\util\RequestUtil.class
 com\katariastoneworld\apis\entity\BillGST$PaymentStatus.class
 com\katariastoneworld\apis\KatariaStoneWorldApisApplication.class
@@ -48,7 +51,9 @@ com\katariastoneworld\apis\dto\CustomerResponseDTO.class
 com\katariastoneworld\apis\service\CustomerService.class
 com\katariastoneworld\apis\dto\BillRequestDTO.class
 com\katariastoneworld\apis\service\BillService.class
+com\katariastoneworld\apis\dto\CategoryResponseDTO.class
 com\katariastoneworld\apis\service\EmailService.class
+com\katariastoneworld\apis\repository\CategoryRepository.class
 com\katariastoneworld\apis\entity\User.class
 com\katariastoneworld\apis\controller\CustomerController.class
 com\katariastoneworld\apis\entity\BillItemGST.class

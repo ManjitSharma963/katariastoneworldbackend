@@ -86,7 +86,13 @@ public class ProductService {
     }
     
     public List<ProductResponseDTO> getAllProducts(String location) {
-        return productRepository.findByLocation(location).stream()
+        List<Product> products;
+        if (location != null && !location.trim().isEmpty()) {
+            products = productRepository.findByLocation(location);
+        } else {
+            products = productRepository.findAll();
+        }
+        return products.stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
     }

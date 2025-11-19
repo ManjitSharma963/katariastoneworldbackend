@@ -16,13 +16,13 @@ import java.util.List;
 
 @RestController
 @RequestMapping({"/api/inventory", "/inventory"})
-@RequiresRole("admin")
 public class ProductController {
     
     @Autowired
     private ProductService productService;
     
     @PostMapping
+    @RequiresRole("admin")
     public ResponseEntity<ProductResponseDTO> createProduct(@Valid @RequestBody ProductRequestDTO productRequestDTO, HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         ProductResponseDTO response = productService.createProduct(productRequestDTO, location);
@@ -30,27 +30,58 @@ public class ProductController {
     }
     
     @GetMapping
-    public ResponseEntity<List<ProductResponseDTO>> getAllProducts(HttpServletRequest request) {
-        String location = RequestUtil.getLocationFromRequest(request);
+    public ResponseEntity<List<ProductResponseDTO>> getAllProducts(
+            @RequestParam(required = false) String location,
+            HttpServletRequest request) {
+        // If location not provided in query param, try to get from request (for authenticated users)
+        if (location == null || location.trim().isEmpty()) {
+            try {
+                location = RequestUtil.getLocationFromRequest(request);
+            } catch (Exception e) {
+                // If not authenticated and no location provided, return all products
+                location = null;
+            }
+        }
         List<ProductResponseDTO> products = productService.getAllProducts(location);
         return ResponseEntity.ok(products);
     }
     
     @GetMapping("/{id}")
-    public ResponseEntity<ProductResponseDTO> getProductById(@PathVariable Long id, HttpServletRequest request) {
-        String location = RequestUtil.getLocationFromRequest(request);
+    public ResponseEntity<ProductResponseDTO> getProductById(
+            @PathVariable Long id,
+            @RequestParam(required = false) String location,
+            HttpServletRequest request) {
+        // If location not provided in query param, try to get from request (for authenticated users)
+        if (location == null || location.trim().isEmpty()) {
+            try {
+                location = RequestUtil.getLocationFromRequest(request);
+            } catch (Exception e) {
+                return ResponseEntity.badRequest().build();
+            }
+        }
         ProductResponseDTO response = productService.getProductById(id, location);
         return ResponseEntity.ok(response);
     }
     
     @GetMapping("/slug/{slug}")
-    public ResponseEntity<ProductResponseDTO> getProductBySlug(@PathVariable String slug, HttpServletRequest request) {
-        String location = RequestUtil.getLocationFromRequest(request);
+    public ResponseEntity<ProductResponseDTO> getProductBySlug(
+            @PathVariable String slug,
+            @RequestParam(required = false) String location,
+            HttpServletRequest request) {
+        // If location not provided in query param, try to get from request (for authenticated users)
+        if (location == null || location.trim().isEmpty()) {
+            try {
+                location = RequestUtil.getLocationFromRequest(request);
+            } catch (Exception e) {
+                return ResponseEntity.badRequest().build();
+            }
+        }
         ProductResponseDTO response = productService.getProductBySlug(slug, location);
         return ResponseEntity.ok(response);
     }
     
     @PutMapping("/{id}")
+    @RequiresRole("admin")
     public ResponseEntity<ProductResponseDTO> updateProduct(@PathVariable Long id, @Valid @RequestBody ProductRequestDTO productRequestDTO, HttpServletRequest request) {
         try {
             String location = RequestUtil.getLocationFromRequest(request);
@@ -62,6 +93,7 @@ public class ProductController {
     }
     
     @DeleteMapping("/{id}")
+    @RequiresRole("admin")
     public ResponseEntity<Void> deleteProduct(@PathVariable Long id, HttpServletRequest request) {
         try {
             String location = RequestUtil.getLocationFromRequest(request);

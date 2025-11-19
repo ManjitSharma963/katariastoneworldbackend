@@ -1,3 +1,4 @@
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Category.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\JwtUtil.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Hero.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\repository\BillNonGSTRepository.java
@@ -19,6 +20,7 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\BillNonGST.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Employee.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\JacksonConfig.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\CategoryResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\WebConfig.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\BillItemGST.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\BillResponseDTO.java
@@ -34,8 +36,11 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\LoginRequestDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\RegisterResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\AuthResponseDTO.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\CategoryService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\PdfService.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\repository\CategoryRepository.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\CustomerRequestDTO.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\CategoryController.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\BillController.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\HeroResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\ProductController.java
