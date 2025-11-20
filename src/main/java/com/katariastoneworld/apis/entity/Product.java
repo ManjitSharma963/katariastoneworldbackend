@@ -34,23 +34,25 @@ public class Product {
     @Column(name = "category_id", columnDefinition = "INT")
     private Long categoryId;
     
-    @NotNull(message = "Product type is required")
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
-    private ProductType productType;
+    @NotBlank(message = "Product type is required")
+    @Column(nullable = false, length = 100)
+    private String productType; // Generic: can be any product type (Marble, Granite, Table, Chair, etc.)
     
     @Column(length = 50)
     private String color;
     
-    @NotNull(message = "Price per sqft is required")
+    @NotNull(message = "Price per unit is required")
     @PositiveOrZero(message = "Price must be positive or zero")
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal pricePerSqft;
+    @Column(name = "price_per_sqft", nullable = false, precision = 10, scale = 2)
+    private BigDecimal pricePerUnit; // Generic: can be per sqft, per piece, per set, etc.
     
-    @NotNull(message = "Total sqft stock is required")
-    @PositiveOrZero(message = "Total sqft stock must be positive or zero")
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal totalSqftStock;
+    @NotNull(message = "Quantity/Stock is required")
+    @PositiveOrZero(message = "Quantity must be positive or zero")
+    @Column(name = "total_sqft_stock", nullable = false, precision = 10, scale = 2)
+    private BigDecimal quantity; // Generic: can be sqft, count, etc.
+    
+    @Column(length = 50)
+    private String unit; // e.g., "sqft", "piece", "set", "pair", etc. Defaults to "sqft" for backward compatibility
     
     @NotBlank(message = "Primary image URL is required")
     @Column(nullable = false, length = 500)
@@ -87,9 +89,5 @@ public class Product {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = LocalDateTime.now();
-    }
-    
-    public enum ProductType {
-        Marble, Granite, Tiles, Countertop, Chemical, Other
     }
 }

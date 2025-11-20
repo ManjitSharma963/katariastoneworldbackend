@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.dto.HeroRequestDTO;
 import com.katariastoneworld.apis.dto.HeroResponseDTO;
 import com.katariastoneworld.apis.entity.Hero;
 import com.katariastoneworld.apis.repository.HeroRepository;
@@ -33,6 +34,44 @@ public class HeroService {
         Hero hero = heroRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Hero not found with id: " + id));
         return convertToDTO(hero);
+    }
+    
+    public HeroResponseDTO createHero(HeroRequestDTO heroRequestDTO) {
+        Hero hero = new Hero();
+        hero.setTitle(heroRequestDTO.getTitle());
+        hero.setImageUrl(heroRequestDTO.getImageUrl());
+        hero.setSubtitle(heroRequestDTO.getSubtitle());
+        hero.setDisplayOrder(heroRequestDTO.getDisplayOrder() != null ? heroRequestDTO.getDisplayOrder() : 0);
+        hero.setIsActive(heroRequestDTO.getIsActive() != null ? heroRequestDTO.getIsActive() : true);
+        
+        Hero savedHero = heroRepository.save(hero);
+        return convertToDTO(savedHero);
+    }
+    
+    public HeroResponseDTO updateHero(Long id, HeroRequestDTO heroRequestDTO) {
+        Hero hero = heroRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Hero not found with id: " + id));
+        
+        hero.setTitle(heroRequestDTO.getTitle());
+        hero.setImageUrl(heroRequestDTO.getImageUrl());
+        if (heroRequestDTO.getSubtitle() != null) {
+            hero.setSubtitle(heroRequestDTO.getSubtitle());
+        }
+        if (heroRequestDTO.getDisplayOrder() != null) {
+            hero.setDisplayOrder(heroRequestDTO.getDisplayOrder());
+        }
+        if (heroRequestDTO.getIsActive() != null) {
+            hero.setIsActive(heroRequestDTO.getIsActive());
+        }
+        
+        Hero updatedHero = heroRepository.save(hero);
+        return convertToDTO(updatedHero);
+    }
+    
+    public void deleteHero(Long id) {
+        Hero hero = heroRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Hero not found with id: " + id));
+        heroRepository.delete(hero);
     }
     
     private HeroResponseDTO convertToDTO(Hero hero) {

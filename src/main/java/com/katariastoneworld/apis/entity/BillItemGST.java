@@ -43,15 +43,18 @@ public class BillItemGST {
     @Column(length = 50)
     private String productType;
     
-    @NotNull(message = "Price per sqft is required")
+    @NotNull(message = "Price per unit is required")
     @Positive(message = "Price must be positive")
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal pricePerSqft;
+    @Column(name = "price_per_sqft", nullable = false, precision = 10, scale = 2)
+    private BigDecimal pricePerUnit; // Generic: can be per sqft, per piece, per packet, etc.
     
-    @NotNull(message = "Sqft ordered is required")
-    @Min(value = 1, message = "Sqft ordered must be at least 1")
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal sqftOrdered;
+    @NotNull(message = "Quantity is required")
+    @Min(value = 1, message = "Quantity must be at least 1")
+    @Column(name = "sqft_ordered", nullable = false, precision = 10, scale = 2)
+    private BigDecimal quantity; // Generic: can be sqft, count, packets, etc.
+    
+    @Column(length = 50)
+    private String unit; // e.g., "sqft", "piece", "packet", "set", etc.
     
     @NotNull(message = "Item total price is required")
     @Column(nullable = false, precision = 10, scale = 2)
@@ -63,8 +66,8 @@ public class BillItemGST {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
-        if (itemTotalPrice == null && pricePerSqft != null && sqftOrdered != null) {
-            itemTotalPrice = pricePerSqft.multiply(sqftOrdered);
+        if (itemTotalPrice == null && pricePerUnit != null && quantity != null) {
+            itemTotalPrice = pricePerUnit.multiply(quantity);
         }
     }
 }

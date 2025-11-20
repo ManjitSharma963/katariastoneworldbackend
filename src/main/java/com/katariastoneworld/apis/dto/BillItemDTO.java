@@ -25,9 +25,10 @@ public class BillItemDTO {
     
     @NotNull(message = "Quantity is required")
     @Min(value = 1, message = "Quantity must be at least 1")
-    private Integer quantity;
+    private Double quantity; // Changed to Double to support decimal quantities (e.g., 2.5 sqft, 1.5 pieces)
     
     // Optional fields
     private String productImageUrl;
     private Long productId;
+    private String unit; // e.g., "sqft", "piece", "packet", "set", etc. - will be taken from product if not provided
 }

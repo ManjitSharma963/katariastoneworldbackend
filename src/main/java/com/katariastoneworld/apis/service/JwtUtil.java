@@ -1,6 +1,7 @@
 package com.katariastoneworld.apis.service;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
@@ -97,6 +98,53 @@ public class JwtUtil {
             return !isTokenExpired(token);
         } catch (Exception e) {
             return false;
+        }
+    }
+    
+    /**
+     * Validates token and returns a result indicating if token is expired or invalid
+     * @return TokenValidationResult with isValid and isExpired flags
+     */
+    public TokenValidationResult validateTokenWithDetails(String token) {
+        if (token == null || token.isEmpty()) {
+            return new TokenValidationResult(false, false, "Token is null or empty");
+        }
+        
+        try {
+            Claims claims = extractAllClaims(token);
+            boolean expired = isTokenExpired(token);
+            return new TokenValidationResult(!expired, expired, expired ? "Token has expired" : null);
+        } catch (ExpiredJwtException e) {
+            return new TokenValidationResult(false, true, "Token has expired");
+        } catch (Exception e) {
+            return new TokenValidationResult(false, false, "Invalid token: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Result class for token validation with detailed information
+     */
+    public static class TokenValidationResult {
+        private final boolean isValid;
+        private final boolean isExpired;
+        private final String message;
+        
+        public TokenValidationResult(boolean isValid, boolean isExpired, String message) {
+            this.isValid = isValid;
+            this.isExpired = isExpired;
+            this.message = message;
+        }
+        
+        public boolean isValid() {
+            return isValid;
+        }
+        
+        public boolean isExpired() {
+            return isExpired;
+        }
+        
+        public String getMessage() {
+            return message;
         }
     }
 }

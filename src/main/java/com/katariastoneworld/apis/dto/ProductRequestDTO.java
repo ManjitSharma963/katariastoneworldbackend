@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.katariastoneworld.apis.entity.Product;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
@@ -22,37 +21,25 @@ public class ProductRequestDTO {
     @NotBlank(message = "Slug is required")
     private String slug;
     
-    @NotNull(message = "Product type is required")
-    @JsonAlias({"product_type", "productTypeString"})
-    private String productTypeString;
+    @NotBlank(message = "Product type is required")
+    @JsonAlias({"product_type", "productType"})
+    private String productType; // Generic: can be any product type (Marble, Granite, Table, Chair, etc.)
     
-    // Getter that converts string to enum (case-insensitive)
-    public Product.ProductType getProductType() {
-        if (productTypeString == null) {
-            return null;
-        }
-        try {
-            // Convert to title case (first letter uppercase, rest lowercase)
-            String normalized = productTypeString.substring(0, 1).toUpperCase() + 
-                               productTypeString.substring(1).toLowerCase();
-            return Product.ProductType.valueOf(normalized);
-        } catch (IllegalArgumentException | StringIndexOutOfBoundsException e) {
-            throw new IllegalArgumentException("Invalid product type: " + productTypeString + 
-                ". Valid types are: Marble, Granite, Tiles, Countertop, Chemical, Other");
-        }
-    }
-    
-    @NotNull(message = "Price per sqft is required")
+    @NotNull(message = "Price per unit is required")
     @PositiveOrZero(message = "Price must be positive or zero")
-    @JsonAlias({"price_per_sqft", "pricePerSqft"})
+    @JsonAlias({"price_per_sqft", "pricePerSqft", "price_per_unit", "pricePerUnit"})
     @JsonDeserialize(using = DoubleDeserializer.class)
-    private Double pricePerSqft;
+    private Double pricePerUnit; // Generic: can be per sqft, per piece, per set, etc.
     
-    @NotNull(message = "Total sqft stock is required")
-    @PositiveOrZero(message = "Total sqft stock must be positive or zero")
-    @JsonAlias({"total_sqft_stock", "totalSqftStock"})
+    @NotNull(message = "Quantity/Stock is required")
+    @PositiveOrZero(message = "Quantity must be positive or zero")
+    @JsonAlias({"total_sqft_stock", "totalSqftStock", "quantity", "stock"})
     @JsonDeserialize(using = DoubleDeserializer.class)
-    private Double totalSqftStock;
+    private Double quantity; // Generic: can be sqft, count, etc.
+    
+    @NotBlank(message = "Unit is required (e.g., sqft, piece, packet, set, pair, box)")
+    @JsonAlias({"unit"})
+    private String unit; // e.g., "sqft", "piece", "set", "pair", etc. REQUIRED - specify the measurement unit
     
     @NotBlank(message = "Primary image URL is required")
     @JsonAlias({"primary_image_url", "primaryImageUrl"})

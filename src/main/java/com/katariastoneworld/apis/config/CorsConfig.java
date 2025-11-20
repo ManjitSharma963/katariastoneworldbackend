@@ -10,22 +10,19 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
 import java.util.Arrays;
-import java.util.List;
 
 @Configuration
 public class CorsConfig {
     
-    private static final List<String> ALLOWED_ORIGINS = Arrays.asList(
-        "http://localhost:3000",
-        "http://localhost:3001"
-    );
-    
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Use setAllowedOriginPatterns for Spring Boot 3.x when using credentials
-        // This allows dynamic origin matching
-        configuration.setAllowedOriginPatterns(ALLOWED_ORIGINS);
+        // Explicitly allow both localhost ports
+        // Using setAllowedOrigins with explicit origins works with credentials
+        configuration.setAllowedOrigins(Arrays.asList(
+            "http://localhost:3000",
+            "http://localhost:3001"
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "X-Requested-With"));
         configuration.setExposedHeaders(Arrays.asList("*"));

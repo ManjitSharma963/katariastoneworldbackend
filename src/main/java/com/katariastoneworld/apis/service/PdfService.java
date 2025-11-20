@@ -263,7 +263,7 @@ public class PdfService {
             for (BillItemDTO item : bill.getItems()) {
                 String itemName = item.getItemName() != null ? item.getItemName() : "-";
                 String category = item.getCategory() != null ? item.getCategory() : "-";
-                int quantity = item.getQuantity() != null ? item.getQuantity() : 0;
+                double quantity = item.getQuantity() != null ? item.getQuantity() : 0.0;
                 double pricePerUnit = item.getPricePerUnit() != null ? item.getPricePerUnit() : 0.0;
                 double itemTotal = pricePerUnit * quantity;
                 
@@ -340,7 +340,7 @@ public class PdfService {
             int srNo = 1;
             for (BillItemDTO item : bill.getItems()) {
                 String itemName = item.getItemName() != null ? item.getItemName() : "-";
-                int quantity = item.getQuantity() != null ? item.getQuantity() : 0;
+                double quantity = item.getQuantity() != null ? item.getQuantity() : 0.0;
                 double pricePerUnit = item.getPricePerUnit() != null ? item.getPricePerUnit() : 0.0;
                 double itemTotal = pricePerUnit * quantity;
                 

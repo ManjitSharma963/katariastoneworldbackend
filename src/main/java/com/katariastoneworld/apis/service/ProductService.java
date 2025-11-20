@@ -30,11 +30,12 @@ public class ProductService {
         Product product = new Product();
         product.setName(productRequestDTO.getName());
         product.setSlug(productRequestDTO.getSlug());
-        product.setProductType(productRequestDTO.getProductType());
-        product.setPricePerSqft(BigDecimal.valueOf(productRequestDTO.getPricePerSqft())
+        product.setProductType(productRequestDTO.getProductType()); // Now accepts any string value
+        product.setPricePerUnit(BigDecimal.valueOf(productRequestDTO.getPricePerUnit())
                 .setScale(2, RoundingMode.HALF_UP));
-        product.setTotalSqftStock(BigDecimal.valueOf(productRequestDTO.getTotalSqftStock())
+        product.setQuantity(BigDecimal.valueOf(productRequestDTO.getQuantity())
                 .setScale(2, RoundingMode.HALF_UP));
+        product.setUnit(productRequestDTO.getUnit().trim()); // Unit is now required, so this should always have a value
         product.setPrimaryImageUrl(productRequestDTO.getPrimaryImageUrl());
         
         // Optional fields
@@ -115,10 +116,19 @@ public class ProductService {
         product.setName(productRequestDTO.getName());
         product.setSlug(productRequestDTO.getSlug());
         product.setProductType(productRequestDTO.getProductType());
-        product.setPricePerSqft(BigDecimal.valueOf(productRequestDTO.getPricePerSqft())
-                .setScale(2, RoundingMode.HALF_UP));
-        product.setTotalSqftStock(BigDecimal.valueOf(productRequestDTO.getTotalSqftStock())
-                .setScale(2, RoundingMode.HALF_UP));
+        
+        if (productRequestDTO.getPricePerUnit() != null) {
+            product.setPricePerUnit(BigDecimal.valueOf(productRequestDTO.getPricePerUnit())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getQuantity() != null) {
+            product.setQuantity(BigDecimal.valueOf(productRequestDTO.getQuantity())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getUnit() != null && !productRequestDTO.getUnit().trim().isEmpty()) {
+            product.setUnit(productRequestDTO.getUnit());
+        }
+        
         product.setPrimaryImageUrl(productRequestDTO.getPrimaryImageUrl());
         
         if (productRequestDTO.getColor() != null) {
@@ -166,12 +176,13 @@ public class ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
         
-        BigDecimal currentStock = product.getTotalSqftStock();
+        BigDecimal currentStock = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
+        String unit = product.getUnit() != null ? product.getUnit() : "sqft";
         BigDecimal newStock = currentStock.subtract(quantityToDeduct);
         
         if (newStock.compareTo(BigDecimal.ZERO) < 0) {
             throw new RuntimeException("Insufficient stock for product: " + product.getName() + 
-                    ". Available: " + currentStock + " sqft, Requested: " + quantityToDeduct + " sqft");
+                    ". Available: " + currentStock + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
     }
     
@@ -185,15 +196,16 @@ public class ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
         
-        BigDecimal currentStock = product.getTotalSqftStock();
+        BigDecimal currentStock = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
+        String unit = product.getUnit() != null ? product.getUnit() : "sqft";
         BigDecimal newStock = currentStock.subtract(quantityToDeduct);
         
         if (newStock.compareTo(BigDecimal.ZERO) < 0) {
             throw new RuntimeException("Insufficient stock for product: " + product.getName() + 
-                    ". Available: " + currentStock + " sqft, Requested: " + quantityToDeduct + " sqft");
+                    ". Available: " + currentStock + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
         
-        product.setTotalSqftStock(newStock.setScale(2, RoundingMode.HALF_UP));
+        product.setQuantity(newStock.setScale(2, RoundingMode.HALF_UP));
         productRepository.save(product);
     }
     
@@ -237,8 +249,9 @@ public class ProductService {
         responseDTO.setCategoryId(product.getCategoryId());
         responseDTO.setProductType(product.getProductType());
         responseDTO.setColor(product.getColor());
-        responseDTO.setPricePerSqft(product.getPricePerSqft().doubleValue());
-        responseDTO.setTotalSqftStock(product.getTotalSqftStock().doubleValue());
+        responseDTO.setPricePerUnit(product.getPricePerUnit() != null ? product.getPricePerUnit().doubleValue() : null);
+        responseDTO.setQuantity(product.getQuantity() != null ? product.getQuantity().doubleValue() : null);
+        responseDTO.setUnit(product.getUnit() != null ? product.getUnit() : "sqft"); // Default for backward compatibility
         responseDTO.setPrimaryImageUrl(product.getPrimaryImageUrl());
         responseDTO.setDescription(product.getDescription());
         responseDTO.setIsFeatured(product.getIsFeatured());

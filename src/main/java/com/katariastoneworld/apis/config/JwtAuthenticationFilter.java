@@ -42,9 +42,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         String requestPath = request.getRequestURI();
+        String method = request.getMethod();
         
-        // Skip authentication for public endpoints
-        if (isPublicEndpoint(requestPath)) {
+        // Skip authentication for public endpoints (only GET requests for inventory/heroes/categories)
+        if (isPublicEndpoint(requestPath, method)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -53,13 +54,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = extractTokenFromRequest(request);
         
         if (token == null) {
-            sendUnauthorizedResponse(response, "Missing authorization token");
+            sendUnauthorizedResponse(response, "Missing authorization token", false);
             return;
         }
         
-        // Validate token
-        if (!jwtUtil.validateToken(token)) {
-            sendUnauthorizedResponse(response, "Invalid or expired token");
+        // Validate token with detailed information
+        JwtUtil.TokenValidationResult validationResult = jwtUtil.validateTokenWithDetails(token);
+        
+        if (!validationResult.isValid()) {
+            // Send specific response for expired tokens to trigger automatic logout
+            sendUnauthorizedResponse(response, validationResult.getMessage(), validationResult.isExpired());
             return;
         }
         
@@ -75,14 +79,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             request.setAttribute("userRole", role);
             request.setAttribute("userLocation", location);
         } catch (Exception e) {
-            sendUnauthorizedResponse(response, "Invalid token format");
+            sendUnauthorizedResponse(response, "Invalid token format", false);
             return;
         }
         
         filterChain.doFilter(request, response);
     }
     
-    private boolean isPublicEndpoint(String path) {
+    private boolean isPublicEndpoint(String path, String method) {
         if (path == null) {
             return false;
         }
@@ -95,8 +99,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             normalizedPath = pathWithoutQuery;
         }
         
-        return PUBLIC_ENDPOINTS.stream()
+        // Check if path matches public endpoints
+        boolean isPublicPath = PUBLIC_ENDPOINTS.stream()
                 .anyMatch(endpoint -> normalizedPath.equals(endpoint) || normalizedPath.startsWith(endpoint + "/"));
+        
+        // For inventory, heroes, and categories - only GET requests are public
+        // POST, PUT, DELETE require authentication
+        if (isPublicPath && (normalizedPath.startsWith("/api/inventory") || 
+                             normalizedPath.startsWith("/inventory") ||
+                             normalizedPath.startsWith("/api/heroes") ||
+                             normalizedPath.startsWith("/heroes") ||
+                             normalizedPath.startsWith("/api/categories") ||
+                             normalizedPath.startsWith("/categories"))) {
+            return "GET".equalsIgnoreCase(method);
+        }
+        
+        // For auth endpoints, all methods are public
+        return isPublicPath;
     }
     
     private String extractTokenFromRequest(HttpServletRequest request) {
@@ -107,11 +126,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
     
-    private void sendUnauthorizedResponse(HttpServletResponse response, String message) throws IOException {
+    private void sendUnauthorizedResponse(HttpServletResponse response, String message, boolean isExpired) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write("{\"error\":\"Unauthorized\",\"message\":\"" + message + "\"}");
+        
+        // Include tokenExpired flag so frontend can automatically logout
+        String jsonResponse = String.format(
+            "{\"error\":\"Unauthorized\",\"message\":\"%s\",\"tokenExpired\":%s,\"code\":\"%s\"}",
+            message,
+            isExpired,
+            isExpired ? "TOKEN_EXPIRED" : "INVALID_TOKEN"
+        );
+        response.getWriter().write(jsonResponse);
     }
 }
 

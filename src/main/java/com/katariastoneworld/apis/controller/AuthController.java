@@ -56,9 +56,17 @@ public class AuthController {
     public ResponseEntity<?> getCurrentUser(HttpServletRequest request) {
         try {
             String token = extractTokenFromRequest(request);
-            if (token == null || !jwtUtil.validateToken(token)) {
+            if (token == null) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(new ErrorResponse("Unauthorized", "Invalid or expired token"));
+                        .body(new TokenErrorResponse("Unauthorized", "Missing authorization token", false, "MISSING_TOKEN"));
+            }
+            
+            JwtUtil.TokenValidationResult validationResult = jwtUtil.validateTokenWithDetails(token);
+            if (!validationResult.isValid()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new TokenErrorResponse("Unauthorized", validationResult.getMessage(), 
+                                validationResult.isExpired(), 
+                                validationResult.isExpired() ? "TOKEN_EXPIRED" : "INVALID_TOKEN"));
             }
             
             Long userId = jwtUtil.extractUserId(token);
@@ -66,7 +74,7 @@ public class AuthController {
             return ResponseEntity.ok(user);
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new ErrorResponse("Unauthorized", "Invalid or expired token"));
+                    .body(new TokenErrorResponse("Unauthorized", "Invalid or expired token", false, "INVALID_TOKEN"));
         }
     }
     
@@ -102,6 +110,53 @@ public class AuthController {
         
         public void setMessage(String message) {
             this.message = message;
+        }
+    }
+    
+    // Inner class for token error responses with expiration flag
+    private static class TokenErrorResponse {
+        private String error;
+        private String message;
+        private boolean tokenExpired;
+        private String code;
+        
+        public TokenErrorResponse(String error, String message, boolean tokenExpired, String code) {
+            this.error = error;
+            this.message = message;
+            this.tokenExpired = tokenExpired;
+            this.code = code;
+        }
+        
+        public String getError() {
+            return error;
+        }
+        
+        public void setError(String error) {
+            this.error = error;
+        }
+        
+        public String getMessage() {
+            return message;
+        }
+        
+        public void setMessage(String message) {
+            this.message = message;
+        }
+        
+        public boolean isTokenExpired() {
+            return tokenExpired;
+        }
+        
+        public void setTokenExpired(boolean tokenExpired) {
+            this.tokenExpired = tokenExpired;
+        }
+        
+        public String getCode() {
+            return code;
+        }
+        
+        public void setCode(String code) {
+            this.code = code;
         }
     }
 }

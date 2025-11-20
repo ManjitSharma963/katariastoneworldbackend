@@ -1,6 +1,5 @@
 package com.katariastoneworld.apis.dto;
 
-import com.katariastoneworld.apis.entity.Product;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -16,10 +15,11 @@ public class ProductResponseDTO {
     private String name;
     private String slug;
     private Long categoryId;
-    private Product.ProductType productType;
+    private String productType; // Generic: can be any product type
     private String color;
-    private Double pricePerSqft;
-    private Double totalSqftStock;
+    private Double pricePerUnit; // Generic: can be per sqft, per piece, per set, etc.
+    private Double quantity; // Generic: can be sqft, count, etc.
+    private String unit; // e.g., "sqft", "piece", "set", "pair", etc.
     private String primaryImageUrl;
     private String description;
     private Boolean isFeatured;

@@ -57,6 +57,9 @@ public class BillService {
         String billNumber = billNumberGeneratorService.generateUniqueBillNumber();
         
         // Calculate total sqft from items (quantity represents sqft)
+        // Calculate total quantity (sum of all item quantities regardless of unit)
+        // Note: This is called "totalSqft" for backward compatibility, but it's actually
+        // a sum of quantities which could be sqft, pieces, packets, etc.
         BigDecimal totalSqft = billRequestDTO.getItems().stream()
                 .map(item -> BigDecimal.valueOf(item.getQuantity()))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -155,9 +158,9 @@ public class BillService {
             BillItemGST item = new BillItemGST();
             item.setProductName(itemDTO.getItemName());
             item.setProductType(itemDTO.getCategory());
-            item.setPricePerSqft(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+            item.setPricePerUnit(BigDecimal.valueOf(itemDTO.getPricePerUnit())
                     .setScale(2, RoundingMode.HALF_UP));
-            item.setSqftOrdered(BigDecimal.valueOf(itemDTO.getQuantity())
+            item.setQuantity(BigDecimal.valueOf(itemDTO.getQuantity())
                     .setScale(2, RoundingMode.HALF_UP));
             item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
                     .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
@@ -168,15 +171,27 @@ public class BillService {
             }
             
             // Link product if productId is provided, otherwise try to find by name
+            Product product = null;
             if (itemDTO.getProductId() != null) {
-                item.setProduct(productService.getProductEntityById(itemDTO.getProductId()));
+                product = productService.getProductEntityById(itemDTO.getProductId());
+                item.setProduct(product);
             } else if (itemDTO.getItemName() != null) {
                 try {
-                    item.setProduct(productService.getProductEntityByName(itemDTO.getItemName()));
+                    product = productService.getProductEntityByName(itemDTO.getItemName());
+                    item.setProduct(product);
                 } catch (RuntimeException e) {
                     // Product not found by name - this is OK, item will be saved without product link
                     // Stock deduction will still happen if product exists
                 }
+            }
+            
+            // Set unit from product if available, otherwise use from DTO or default to "sqft"
+            if (product != null && product.getUnit() != null && !product.getUnit().trim().isEmpty()) {
+                item.setUnit(product.getUnit());
+            } else if (itemDTO.getUnit() != null && !itemDTO.getUnit().trim().isEmpty()) {
+                item.setUnit(itemDTO.getUnit());
+            } else {
+                item.setUnit("sqft"); // Default for backward compatibility
             }
             
             bill.addItem(item);
@@ -270,9 +285,9 @@ public class BillService {
             BillItemNonGST item = new BillItemNonGST();
             item.setProductName(itemDTO.getItemName());
             item.setProductType(itemDTO.getCategory());
-            item.setPricePerSqft(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+            item.setPricePerUnit(BigDecimal.valueOf(itemDTO.getPricePerUnit())
                     .setScale(2, RoundingMode.HALF_UP));
-            item.setSqftOrdered(BigDecimal.valueOf(itemDTO.getQuantity())
+            item.setQuantity(BigDecimal.valueOf(itemDTO.getQuantity())
                     .setScale(2, RoundingMode.HALF_UP));
             item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
                     .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
@@ -283,15 +298,27 @@ public class BillService {
             }
             
             // Link product if productId is provided, otherwise try to find by name
+            Product product = null;
             if (itemDTO.getProductId() != null) {
-                item.setProduct(productService.getProductEntityById(itemDTO.getProductId()));
+                product = productService.getProductEntityById(itemDTO.getProductId());
+                item.setProduct(product);
             } else if (itemDTO.getItemName() != null) {
                 try {
-                    item.setProduct(productService.getProductEntityByName(itemDTO.getItemName()));
+                    product = productService.getProductEntityByName(itemDTO.getItemName());
+                    item.setProduct(product);
                 } catch (RuntimeException e) {
                     // Product not found by name - this is OK, item will be saved without product link
                     // Stock deduction will still happen if product exists
                 }
+            }
+            
+            // Set unit from product if available, otherwise use from DTO or default to "sqft"
+            if (product != null && product.getUnit() != null && !product.getUnit().trim().isEmpty()) {
+                item.setUnit(product.getUnit());
+            } else if (itemDTO.getUnit() != null && !itemDTO.getUnit().trim().isEmpty()) {
+                item.setUnit(itemDTO.getUnit());
+            } else {
+                item.setUnit("sqft"); // Default for backward compatibility
             }
             
             bill.addItem(item);
@@ -433,8 +460,9 @@ public class BillService {
                     BillItemDTO itemDTO = new BillItemDTO();
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
-                    itemDTO.setPricePerUnit(item.getPricePerSqft().doubleValue());
-                    itemDTO.setQuantity(item.getSqftOrdered().intValue());
+                    itemDTO.setPricePerUnit(item.getPricePerUnit().doubleValue());
+                    itemDTO.setQuantity(item.getQuantity().doubleValue()); // Changed to doubleValue() to support decimal quantities
+                    itemDTO.setUnit(item.getUnit() != null ? item.getUnit() : "sqft"); // Default for backward compatibility
                     itemDTO.setProductImageUrl(item.getProductImageUrl());
                     if (item.getProduct() != null) {
                         itemDTO.setProductId(item.getProduct().getId());
@@ -478,8 +506,9 @@ public class BillService {
                     BillItemDTO itemDTO = new BillItemDTO();
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
-                    itemDTO.setPricePerUnit(item.getPricePerSqft().doubleValue());
-                    itemDTO.setQuantity(item.getSqftOrdered().intValue());
+                    itemDTO.setPricePerUnit(item.getPricePerUnit().doubleValue());
+                    itemDTO.setQuantity(item.getQuantity().doubleValue()); // Changed to doubleValue() to support decimal quantities
+                    itemDTO.setUnit(item.getUnit() != null ? item.getUnit() : "sqft"); // Default for backward compatibility
                     itemDTO.setProductImageUrl(item.getProductImageUrl());
                     if (item.getProduct() != null) {
                         itemDTO.setProductId(item.getProduct().getId());

@@ -15,10 +15,10 @@ com\katariastoneworld\apis\dto\DoubleDeserializer.class
 com\katariastoneworld\apis\entity\Category.class
 com\katariastoneworld\apis\entity\Inquiry$InquiryStatus.class
 com\katariastoneworld\apis\entity\Bill$PaymentStatus.class
-com\katariastoneworld\apis\entity\Product$ProductType.class
 com\katariastoneworld\apis\dto\RegisterRequestDTO.class
 com\katariastoneworld\apis\entity\BillGST.class
 com\katariastoneworld\apis\entity\Hero.class
+com\katariastoneworld\apis\service\JwtUtil$TokenValidationResult.class
 com\katariastoneworld\apis\entity\Product.class
 com\katariastoneworld\apis\controller\ProductController.class
 com\katariastoneworld\apis\entity\Inquiry.class
@@ -46,6 +46,7 @@ com\katariastoneworld\apis\controller\ExpenseController.class
 com\katariastoneworld\apis\dto\ExpenseResponseDTO.class
 com\katariastoneworld\apis\repository\UserRepository.class
 com\katariastoneworld\apis\config\JacksonConfig.class
+com\katariastoneworld\apis\dto\HeroRequestDTO.class
 com\katariastoneworld\apis\service\HeroService.class
 com\katariastoneworld\apis\dto\CustomerResponseDTO.class
 com\katariastoneworld\apis\service\CustomerService.class
@@ -54,6 +55,7 @@ com\katariastoneworld\apis\service\BillService.class
 com\katariastoneworld\apis\dto\CategoryResponseDTO.class
 com\katariastoneworld\apis\service\EmailService.class
 com\katariastoneworld\apis\repository\CategoryRepository.class
+com\katariastoneworld\apis\dto\CategoryRequestDTO.class
 com\katariastoneworld\apis\entity\User.class
 com\katariastoneworld\apis\controller\CustomerController.class
 com\katariastoneworld\apis\entity\BillItemGST.class
@@ -63,6 +65,7 @@ com\katariastoneworld\apis\repository\EmployeeRepository.class
 com\katariastoneworld\apis\dto\ExpenseRequestDTO.class
 com\katariastoneworld\apis\repository\BillNonGSTRepository.class
 com\katariastoneworld\apis\repository\BillRepository.class
+com\katariastoneworld\apis\controller\AuthController$TokenErrorResponse.class
 com\katariastoneworld\apis\controller\AuthController.class
 com\katariastoneworld\apis\config\RequiresRole.class
 com\katariastoneworld\apis\service\PdfService.class
