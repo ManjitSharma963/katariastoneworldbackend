@@ -29,7 +29,6 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\RequiresRole.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\EmployeeRequestDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\BillRequestDTO.java
-C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Inquiry.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\ExpenseController.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\ExpenseResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\UserResponseDTO.java
@@ -46,7 +45,6 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\BillController.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\HeroResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\ProductController.java
-C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Bill.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\HeroService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\Product.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\RoleAuthorizationFilter.java
@@ -66,9 +64,7 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\EmailService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\EmployeeService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\repository\CustomerRepository.java
-C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\repository\BillRepository.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\ProductService.java
-C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\BillItem.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\JwtAuthenticationFilter.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\controller\AuthController.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\BillItemDTO.java

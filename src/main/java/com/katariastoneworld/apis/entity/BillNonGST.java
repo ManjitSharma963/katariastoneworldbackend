@@ -35,10 +35,6 @@ public class BillNonGST {
     @JoinColumn(name = "customer_id", nullable = false, foreignKey = @ForeignKey(name = "fk_bill_non_gst_customer", value = ConstraintMode.NO_CONSTRAINT))
     private Customer customer;
     
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "inquiry_id", nullable = true, foreignKey = @ForeignKey(name = "fk_bill_non_gst_inquiry", value = ConstraintMode.NO_CONSTRAINT))
-    private Inquiry inquiry;
-    
     @NotNull(message = "Bill date is required")
     @Column(nullable = false)
     private LocalDate billDate;
