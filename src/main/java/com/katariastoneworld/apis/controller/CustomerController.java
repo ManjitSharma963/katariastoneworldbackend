@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.CustomerRequestDTO;
 import com.katariastoneworld.apis.dto.CustomerResponseDTO;
 import com.katariastoneworld.apis.service.CustomerService;
 import com.katariastoneworld.apis.util.RequestUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +19,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/customers")
+@Tag(name = "Customers", description = "Customer management endpoints")
 public class CustomerController {
     
     @Autowired

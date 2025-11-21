@@ -4,6 +4,9 @@ import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.HeroRequestDTO;
 import com.katariastoneworld.apis.dto.HeroResponseDTO;
 import com.katariastoneworld.apis.service.HeroService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -14,6 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping({"/api/heroes", "/heroes"})
+@Tag(name = "Heroes", description = "Hero section content management endpoints")
 public class HeroController {
     
     @Autowired

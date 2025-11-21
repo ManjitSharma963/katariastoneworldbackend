@@ -34,7 +34,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         "/api/heroes",
         "/heroes",
         "/api/categories",
-        "/categories"
+        "/categories",
+        // Swagger UI endpoints - publicly accessible
+        "/swagger-ui.html",
+        "/swagger-ui",
+        "/swagger-ui/",
+        "/swagger-ui/index.html",
+        "/api-docs",
+        "/v3/api-docs",
+        "/v3/api-docs/swagger-config"
     );
     
     @Override
@@ -102,6 +110,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         // Check if path matches public endpoints
         boolean isPublicPath = PUBLIC_ENDPOINTS.stream()
                 .anyMatch(endpoint -> normalizedPath.equals(endpoint) || normalizedPath.startsWith(endpoint + "/"));
+        
+        // Swagger UI and API docs are always public (all methods)
+        if (normalizedPath.startsWith("/swagger-ui") || 
+            normalizedPath.startsWith("/api-docs") || 
+            normalizedPath.startsWith("/v3/api-docs")) {
+            return true;
+        }
         
         // For inventory, heroes, and categories - only GET requests are public
         // POST, PUT, DELETE require authentication

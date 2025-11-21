@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
 import com.katariastoneworld.apis.service.ProductService;
 import com.katariastoneworld.apis.util.RequestUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,11 +19,14 @@ import java.util.List;
 
 @RestController
 @RequestMapping({"/api/inventory", "/inventory"})
+@Tag(name = "Products/Inventory", description = "Product and inventory management endpoints")
 public class ProductController {
     
     @Autowired
     private ProductService productService;
     
+    @Operation(summary = "Create a new product", description = "Create a new product in inventory. Requires admin role.")
+    @SecurityRequirement(name = "bearerAuth")
     @PostMapping
     @RequiresRole("admin")
     public ResponseEntity<ProductResponseDTO> createProduct(@Valid @RequestBody ProductRequestDTO productRequestDTO, HttpServletRequest request) {

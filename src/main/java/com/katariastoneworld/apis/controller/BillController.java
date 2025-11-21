@@ -7,6 +7,13 @@ import com.katariastoneworld.apis.service.BillService;
 import com.katariastoneworld.apis.service.EmailService;
 import com.katariastoneworld.apis.service.PdfService;
 import com.katariastoneworld.apis.util.RequestUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +27,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping({"/api/bills", "/bills"})
+@Tag(name = "Bills", description = "Bill management endpoints for GST and Non-GST bills")
 public class BillController {
     
     @Autowired
@@ -31,6 +39,17 @@ public class BillController {
     @Autowired
     private PdfService pdfService;
     
+    @Operation(
+            summary = "Create a new bill",
+            description = "Create a new bill (GST or Non-GST) with customer and items. Location is automatically extracted from JWT token."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Bill created successfully",
+                    content = @Content(schema = @Schema(implementation = BillResponseDTO.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request data"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @PostMapping
     @RequiresRole({"user", "admin"})
     public ResponseEntity<BillResponseDTO> createBill(@Valid @RequestBody BillRequestDTO billRequestDTO, HttpServletRequest request) {
@@ -40,6 +59,12 @@ public class BillController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
     
+    @Operation(
+            summary = "Get bill by bill number",
+            description = "Retrieve a bill by its unique bill number"
+    )
+    @Parameter(name = "billNumber", description = "Bill number (sequential number: 1, 2, 3, etc.)", required = true)
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping("/number/{billNumber}")
     @RequiresRole("admin")
     public ResponseEntity<BillResponseDTO> getBillByBillNumber(@PathVariable String billNumber, HttpServletRequest request) {
@@ -74,6 +99,11 @@ public class BillController {
         }
     }
     
+    @Operation(
+            summary = "Get all bills",
+            description = "Get all bills for the authenticated user's location. Requires admin role."
+    )
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping
     @RequiresRole("admin")
     public ResponseEntity<List<BillResponseDTO>> getAllBills(HttpServletRequest request) {
@@ -113,6 +143,14 @@ public class BillController {
      * Download bill PDF by bill number
      * GET /api/bills/number/{billNumber}/download
      */
+    @Operation(
+            summary = "Download bill PDF by bill number",
+            description = "Download the PDF version of a bill by its bill number"
+    )
+    @Parameter(name = "billNumber", description = "Bill number", required = true)
+    @ApiResponse(responseCode = "200", description = "PDF file downloaded successfully",
+            content = @Content(mediaType = "application/pdf"))
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping("/number/{billNumber}/download")
     @RequiresRole("admin")
     public ResponseEntity<byte[]> downloadBillByNumber(@PathVariable String billNumber, HttpServletRequest request) {

@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
 import com.katariastoneworld.apis.dto.ExpenseResponseDTO;
 import com.katariastoneworld.apis.service.ExpenseService;
 import com.katariastoneworld.apis.util.RequestUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +20,7 @@ import java.util.List;
 @RestController
 @RequestMapping(value = {"/api/expenses","expenses"}, produces = "application/json")
 @RequiresRole("admin")
+@Tag(name = "Expenses", description = "Expense tracking and management endpoints. All endpoints require admin role.")
 public class ExpenseController {
     
     @Autowired

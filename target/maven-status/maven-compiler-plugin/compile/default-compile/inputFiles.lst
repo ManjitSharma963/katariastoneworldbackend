@@ -7,6 +7,7 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\CorsConfig.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\CustomerService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\ExpenseService.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\CustomCorsFilter.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\ProductResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\exception\GlobalExceptionHandler.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\ExpenseRequestDTO.java
@@ -36,6 +37,8 @@ C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\entity\BillGST.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\LoginRequestDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\RegisterResponseDTO.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\CorsFilterConfig.java
+C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\config\OpenApiConfig.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\dto\AuthResponseDTO.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\CategoryService.java
 C:\Users\Manjit\katariastoneworld_apis\src\main\java\com\katariastoneworld\apis\service\PdfService.java

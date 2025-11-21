@@ -15,6 +15,14 @@ public class RoleAuthorizationFilter implements HandlerInterceptor {
     
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        // Allow Swagger UI and API docs - they are static resources
+        String requestPath = request.getRequestURI();
+        if (requestPath != null && (requestPath.startsWith("/swagger-ui") || 
+                                    requestPath.startsWith("/api-docs") || 
+                                    requestPath.startsWith("/v3/api-docs"))) {
+            return true;
+        }
+        
         // Only process method handlers
         if (!(handler instanceof HandlerMethod)) {
             return true;

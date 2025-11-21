@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.EmployeeRequestDTO;
 import com.katariastoneworld.apis.dto.EmployeeResponseDTO;
 import com.katariastoneworld.apis.service.EmployeeService;
 import com.katariastoneworld.apis.util.RequestUtil;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +20,7 @@ import java.util.List;
 @RestController
 @RequestMapping(value = {"/api/employees","employees"}, produces = "application/json")
 @RequiresRole("admin")
+@Tag(name = "Employees", description = "Employee management endpoints. All endpoints require admin role.")
 public class EmployeeController {
     
     @Autowired

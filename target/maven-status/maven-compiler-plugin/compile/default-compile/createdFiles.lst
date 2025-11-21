@@ -5,6 +5,7 @@ com\katariastoneworld\apis\entity\BillItemNonGST.class
 com\katariastoneworld\apis\entity\Seller.class
 com\katariastoneworld\apis\controller\HeroController.class
 com\katariastoneworld\apis\dto\AuthResponseDTO.class
+com\katariastoneworld\apis\config\OpenApiConfig.class
 com\katariastoneworld\apis\controller\BillController.class
 com\katariastoneworld\apis\repository\SellerRepository.class
 com\katariastoneworld\apis\dto\ProductRequestDTO.class
@@ -13,6 +14,7 @@ com\katariastoneworld\apis\repository\BillGSTRepository.class
 com\katariastoneworld\apis\config\CorsConfig.class
 com\katariastoneworld\apis\dto\DoubleDeserializer.class
 com\katariastoneworld\apis\entity\Category.class
+com\katariastoneworld\apis\config\CorsFilterConfig$CorsFilter.class
 com\katariastoneworld\apis\dto\RegisterRequestDTO.class
 com\katariastoneworld\apis\entity\BillGST.class
 com\katariastoneworld\apis\entity\Hero.class
@@ -50,6 +52,7 @@ com\katariastoneworld\apis\service\CustomerService.class
 com\katariastoneworld\apis\dto\BillRequestDTO.class
 com\katariastoneworld\apis\service\BillService.class
 com\katariastoneworld\apis\dto\CategoryResponseDTO.class
+com\katariastoneworld\apis\config\CustomCorsFilter.class
 com\katariastoneworld\apis\service\EmailService.class
 com\katariastoneworld\apis\repository\CategoryRepository.class
 com\katariastoneworld\apis\dto\CategoryRequestDTO.class
@@ -62,6 +65,7 @@ com\katariastoneworld\apis\repository\EmployeeRepository.class
 com\katariastoneworld\apis\dto\ExpenseRequestDTO.class
 com\katariastoneworld\apis\repository\BillNonGSTRepository.class
 com\katariastoneworld\apis\controller\AuthController$TokenErrorResponse.class
+com\katariastoneworld\apis\config\CorsFilterConfig.class
 com\katariastoneworld\apis\controller\AuthController.class
 com\katariastoneworld\apis\config\RequiresRole.class
 com\katariastoneworld\apis\service\PdfService.class

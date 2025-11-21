@@ -4,6 +4,9 @@ import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.CategoryRequestDTO;
 import com.katariastoneworld.apis.dto.CategoryResponseDTO;
 import com.katariastoneworld.apis.service.CategoryService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -14,6 +17,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/categories")
+@Tag(name = "Categories", description = "Category management endpoints")
 public class CategoryController {
     
     @Autowired

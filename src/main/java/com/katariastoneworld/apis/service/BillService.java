@@ -53,9 +53,6 @@ public class BillService {
                 location
         );
         
-        // Generate unique bill number
-        String billNumber = billNumberGeneratorService.generateUniqueBillNumber();
-        
         // Calculate total sqft from items (quantity represents sqft)
         // Calculate total quantity (sum of all item quantities regardless of unit)
         // Note: This is called "totalSqft" for backward compatibility, but it's actually
@@ -81,6 +78,14 @@ public class BillService {
         // Determine if GST or NonGST based on tax percentage
         BigDecimal taxPercentage = BigDecimal.valueOf(billRequestDTO.getTaxPercentage());
         boolean isGST = taxPercentage.compareTo(BigDecimal.ZERO) > 0;
+        
+        // Generate bill number based on bill type (separate series for GST and Non-GST)
+        String billNumber;
+        if (isGST) {
+            billNumber = billNumberGeneratorService.generateGSTBillNumber();
+        } else {
+            billNumber = billNumberGeneratorService.generateNonGSTBillNumber();
+        }
         
         if (isGST) {
             return createGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal, 

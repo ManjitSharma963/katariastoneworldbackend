@@ -17,8 +17,8 @@ public class WebConfig implements WebMvcConfigurer {
         registry.addInterceptor(roleAuthorizationFilter);
     }
     
-    // CORS is handled by CorsConfig filter to ensure dynamic origin matching
-    // Removing WebMvcConfigurer CORS to avoid conflicts with the filter
+    // CORS is handled by CustomCorsFilter and CorsConfig filter
+    // Do not add CORS mapping here to avoid conflicts
     
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
