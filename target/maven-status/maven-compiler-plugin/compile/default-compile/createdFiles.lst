@@ -3,6 +3,7 @@ com\katariastoneworld\apis\dto\BillResponseDTO.class
 com\katariastoneworld\apis\entity\BillNonGST.class
 com\katariastoneworld\apis\entity\BillItemNonGST.class
 com\katariastoneworld\apis\entity\Seller.class
+com\katariastoneworld\apis\config\CorsFilterConfig$CorsResponseWrapper.class
 com\katariastoneworld\apis\controller\HeroController.class
 com\katariastoneworld\apis\dto\AuthResponseDTO.class
 com\katariastoneworld\apis\config\OpenApiConfig.class

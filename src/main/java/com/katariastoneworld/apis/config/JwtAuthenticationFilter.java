@@ -52,6 +52,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String requestPath = request.getRequestURI();
         String method = request.getMethod();
         
+        // Always allow OPTIONS requests (CORS preflight) - they don't need authentication
+        if ("OPTIONS".equalsIgnoreCase(method)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        
         // Skip authentication for public endpoints (only GET requests for inventory/heroes/categories)
         if (isPublicEndpoint(requestPath, method)) {
             filterChain.doFilter(request, response);
