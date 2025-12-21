@@ -57,6 +57,26 @@ public class ProductService {
         if (productRequestDTO.getMetaKeywords() != null) {
             product.setMetaKeywords(productRequestDTO.getMetaKeywords());
         }
+        if (productRequestDTO.getLabourCharges() != null) {
+            product.setLabourCharges(BigDecimal.valueOf(productRequestDTO.getLabourCharges())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getRtoFees() != null) {
+            product.setRtoFees(BigDecimal.valueOf(productRequestDTO.getRtoFees())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getDamageExpenses() != null) {
+            product.setDamageExpenses(BigDecimal.valueOf(productRequestDTO.getDamageExpenses())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getOthersExpenses() != null) {
+            product.setOthersExpenses(BigDecimal.valueOf(productRequestDTO.getOthersExpenses())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getPricePerSqftAfter() != null) {
+            product.setPricePerSqftAfter(BigDecimal.valueOf(productRequestDTO.getPricePerSqftAfter())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
         
         // Set location
         product.setLocation(location);
@@ -148,6 +168,26 @@ public class ProductService {
         }
         if (productRequestDTO.getMetaKeywords() != null) {
             product.setMetaKeywords(productRequestDTO.getMetaKeywords());
+        }
+        if (productRequestDTO.getLabourCharges() != null) {
+            product.setLabourCharges(BigDecimal.valueOf(productRequestDTO.getLabourCharges())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getRtoFees() != null) {
+            product.setRtoFees(BigDecimal.valueOf(productRequestDTO.getRtoFees())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getDamageExpenses() != null) {
+            product.setDamageExpenses(BigDecimal.valueOf(productRequestDTO.getDamageExpenses())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getOthersExpenses() != null) {
+            product.setOthersExpenses(BigDecimal.valueOf(productRequestDTO.getOthersExpenses())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getPricePerSqftAfter() != null) {
+            product.setPricePerSqftAfter(BigDecimal.valueOf(productRequestDTO.getPricePerSqftAfter())
+                    .setScale(2, RoundingMode.HALF_UP));
         }
         
         Product updatedProduct = productRepository.save(product);
@@ -257,6 +297,11 @@ public class ProductService {
         responseDTO.setIsFeatured(product.getIsFeatured());
         responseDTO.setIsActive(product.getIsActive());
         responseDTO.setMetaKeywords(product.getMetaKeywords());
+        responseDTO.setLabourCharges(product.getLabourCharges() != null ? product.getLabourCharges().doubleValue() : null);
+        responseDTO.setRtoFees(product.getRtoFees() != null ? product.getRtoFees().doubleValue() : null);
+        responseDTO.setDamageExpenses(product.getDamageExpenses() != null ? product.getDamageExpenses().doubleValue() : null);
+        responseDTO.setOthersExpenses(product.getOthersExpenses() != null ? product.getOthersExpenses().doubleValue() : null);
+        responseDTO.setPricePerSqftAfter(product.getPricePerSqftAfter() != null ? product.getPricePerSqftAfter().doubleValue() : null);
         responseDTO.setCreatedAt(product.getCreatedAt());
         responseDTO.setUpdatedAt(product.getUpdatedAt());
         

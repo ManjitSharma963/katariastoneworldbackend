@@ -62,9 +62,11 @@ com\katariastoneworld\apis\dto\CategoryResponseDTO.class
 com\katariastoneworld\apis\config\CustomCorsFilter.class
 com\katariastoneworld\apis\config\SimpleCorsFilter.class
 com\katariastoneworld\apis\service\EmailService.class
+com\katariastoneworld\apis\entity\StateGstMaster.class
 com\katariastoneworld\apis\repository\CategoryRepository.class
 com\katariastoneworld\apis\dto\CategoryRequestDTO.class
 com\katariastoneworld\apis\entity\User.class
+com\katariastoneworld\apis\repository\StateGstMasterRepository.class
 com\katariastoneworld\apis\controller\CustomerController.class
 com\katariastoneworld\apis\entity\BillItemGST.class
 com\katariastoneworld\apis\service\ExpenseService.class

@@ -3,7 +3,9 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.BillItemDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
 import com.katariastoneworld.apis.entity.Seller;
+import com.katariastoneworld.apis.entity.StateGstMaster;
 import com.katariastoneworld.apis.repository.SellerRepository;
+import com.katariastoneworld.apis.repository.StateGstMasterRepository;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -22,6 +24,9 @@ public class PdfService {
     
     @Autowired
     private SellerRepository sellerRepository;
+    
+    @Autowired
+    private StateGstMasterRepository stateGstMasterRepository;
     
     private static final DecimalFormat DECIMAL_FORMAT = new DecimalFormat("#,##0.00");
     private static final DecimalFormat DECIMAL_FORMAT_NO_DECIMAL = new DecimalFormat("#,##0");
@@ -120,7 +125,6 @@ public class PdfService {
         html = html.replace("{{buyerOrderNo}}", "-");
         html = html.replace("{{bin}}", "-");
         html = html.replace("{{ewayBillNo}}", "-");
-        html = html.replace("{{buyerIfOther}}", "SAME AS CONSIGNEE");
         
         // Extract states from addresses
         String stateOfOrigin = extractStateFromAddress(seller.getAddress());
@@ -129,6 +133,34 @@ public class PdfService {
         System.out.println("Extracted states:");
         System.out.println("  - State of Origin (from seller address): '" + stateOfOrigin + "'");
         System.out.println("  - State of Destination (from customer address): '" + stateOfDestination + "'");
+        
+        // Fetch GST codes from state_gst_master table
+        String sellerStateGstCode = "-";
+        String buyerStateGstCode = "-";
+        
+        if (stateOfOrigin != null && !stateOfOrigin.isEmpty()) {
+            StateGstMaster sellerStateGst = stateGstMasterRepository.findByStateNameIgnoreCase(stateOfOrigin).orElse(null);
+            if (sellerStateGst != null) {
+                sellerStateGstCode = sellerStateGst.getGstCode();
+                System.out.println("  - Seller State GST Code: '" + sellerStateGstCode + "'");
+            } else {
+                System.out.println("  - Warning: Seller State GST Code not found for state: '" + stateOfOrigin + "'");
+            }
+        }
+        
+        if (stateOfDestination != null && !stateOfDestination.isEmpty()) {
+            StateGstMaster buyerStateGst = stateGstMasterRepository.findByStateNameIgnoreCase(stateOfDestination).orElse(null);
+            if (buyerStateGst != null) {
+                buyerStateGstCode = buyerStateGst.getGstCode();
+                System.out.println("  - Buyer State GST Code: '" + buyerStateGstCode + "'");
+            } else {
+                System.out.println("  - Warning: Buyer State GST Code not found for state: '" + stateOfDestination + "'");
+            }
+        }
+        
+        // State GST Codes - replace in template after fetching
+        html = html.replace("{{sellerStateGstCode}}", sellerStateGstCode);
+        html = html.replace("{{buyerStateGstCode}}", buyerStateGstCode);
         
         // Transport Details
         html = html.replace("{{preCarriageBy}}", "ROAD");
@@ -165,23 +197,23 @@ public class PdfService {
         System.out.println("  - State of Destination: '" + stateOfDestination + "'");
         System.out.println("  - Same State: " + isSameState);
         
-        // Calculate tax based on state: Different states = divide into two parts, Same state = don't divide
+        // Calculate tax based on state: Same state = divide into two parts (CGST+SGST), Different states = IGST (one tax)
         double taxAmount = bill.getTaxAmount() != null ? bill.getTaxAmount() : 0.0;
         double cgstAmount = 0.0;
         double sgstAmount = 0.0;
         double igstAmount = 0.0;
         
-        if (!isSameState && taxAmount > 0) {
-            // Different states: Divide tax into two parts (9% + 9% = 18%)
+        if (isSameState && taxAmount > 0) {
+            // Same state (intra-state): Divide tax into two parts (9% + 9% = 18%)
             cgstAmount = taxAmount / 2.0;
             sgstAmount = taxAmount / 2.0;
-            System.out.println("  - Different states: Dividing tax into two parts");
+            System.out.println("  - Same state (intra-state): Dividing tax into two parts");
             System.out.println("  - CGST Amount (9%): " + cgstAmount);
             System.out.println("  - SGST Amount (9%): " + sgstAmount);
         } else if (taxAmount > 0) {
-            // Same state: Don't divide, show as one tax (18%)
+            // Different states (inter-state): Show as one tax IGST (18%)
             igstAmount = taxAmount;
-            System.out.println("  - Same state: Not dividing tax");
+            System.out.println("  - Different states (inter-state): Using IGST");
             System.out.println("  - IGST Amount (18%): " + igstAmount);
         }
         

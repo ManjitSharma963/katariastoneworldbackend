@@ -70,6 +70,21 @@ public class Product {
     @Column(length = 500)
     private String metaKeywords;
     
+    @Column(name = "labour_charges", precision = 10, scale = 2)
+    private BigDecimal labourCharges;
+    
+    @Column(name = "rto_fees", precision = 10, scale = 2)
+    private BigDecimal rtoFees;
+    
+    @Column(name = "damage_expenses", precision = 10, scale = 2)
+    private BigDecimal damageExpenses;
+    
+    @Column(name = "others_expenses", precision = 10, scale = 2)
+    private BigDecimal othersExpenses;
+    
+    @Column(name = "price_per_sqft_after", precision = 10, scale = 2)
+    private BigDecimal pricePerSqftAfter;
+    
     @NotBlank(message = "Location is required")
     @Column(nullable = false, length = 50)
     private String location; // Bhondsi or Tapugada

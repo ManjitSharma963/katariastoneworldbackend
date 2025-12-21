@@ -22,7 +22,7 @@ public class ProductRequestDTO {
     private String slug;
     
     @NotBlank(message = "Product type is required")
-    @JsonAlias({"product_type", "productType"})
+    @JsonAlias({"product_type", "productType", "productTypeString"})
     private String productType; // Generic: can be any product type (Marble, Granite, Table, Chair, etc.)
     
     @NotNull(message = "Price per unit is required")
@@ -61,5 +61,26 @@ public class ProductRequestDTO {
     @JsonAlias({"meta_keywords", "metaKeywords"})
     private String metaKeywords;
     
+    @JsonAlias({"labour_charges", "labourCharges"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double labourCharges;
+    
+    @JsonAlias({"rto_fees", "rtoFees"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double rtoFees;
+    
+    @JsonAlias({"damage_expenses", "damageExpenses"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double damageExpenses;
+    
+    @JsonAlias({"others_expenses", "othersExpenses"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double othersExpenses;
+    
+    @JsonAlias({"price_per_sqft_after", "pricePerSqftAfter"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double pricePerSqftAfter;
+    
     // Location will be set from JWT token, not from request
+    // role and userRole are from JWT token, not from request body
 }

@@ -25,6 +25,11 @@ public class ProductResponseDTO {
     private Boolean isFeatured;
     private Boolean isActive;
     private String metaKeywords;
+    private Double labourCharges;
+    private Double rtoFees;
+    private Double damageExpenses;
+    private Double othersExpenses;
+    private Double pricePerSqftAfter;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
