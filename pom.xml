@@ -75,6 +75,7 @@
     <artifactId>spring-boot-starter-mail</artifactId>
 </dependency>
 
+
         <!-- OpenHTMLToPDF for HTML to PDF conversion -->
         <dependency>
             <groupId>com.openhtmltopdf</groupId>
