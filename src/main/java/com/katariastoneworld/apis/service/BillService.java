@@ -358,7 +358,7 @@ public class BillService {
     
     public BillResponseDTO getBillById(Long id, String billType, String location) {
         if ("GST".equalsIgnoreCase(billType) || "gst".equalsIgnoreCase(billType)) {
-            BillGST bill = billGSTRepository.findById(id)
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(id)
                     .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + id));
             // Verify location matches
             if (!location.equals(bill.getCustomer().getLocation())) {
@@ -366,7 +366,7 @@ public class BillService {
             }
             return convertGSTToResponseDTO(bill);
         } else {
-            BillNonGST bill = billNonGSTRepository.findById(id)
+            BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(id)
                     .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + id));
             // Verify location matches
             if (!location.equals(bill.getCustomer().getLocation())) {
@@ -378,13 +378,13 @@ public class BillService {
     
     public BillResponseDTO getBillByBillNumber(String billNumber, String location) {
         // Check GST bills first
-        BillGST gstBill = billGSTRepository.findByBillNumberAndCustomerLocation(billNumber, location).orElse(null);
+        BillGST gstBill = billGSTRepository.findByBillNumberAndCustomerLocationWithItemsAndProducts(billNumber, location).orElse(null);
         if (gstBill != null) {
             return convertGSTToResponseDTO(gstBill);
         }
         
         // Check NonGST bills
-        BillNonGST nonGstBill = billNonGSTRepository.findByBillNumberAndCustomerLocation(billNumber, location).orElse(null);
+        BillNonGST nonGstBill = billNonGSTRepository.findByBillNumberAndCustomerLocationWithItemsAndProducts(billNumber, location).orElse(null);
         if (nonGstBill != null) {
             return convertNonGSTToResponseDTO(nonGstBill);
         }
@@ -465,12 +465,28 @@ public class BillService {
                     BillItemDTO itemDTO = new BillItemDTO();
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
-                    itemDTO.setPricePerUnit(item.getPricePerUnit().doubleValue());
+                    // Use pricePerSqftAfter from product if available, otherwise use stored pricePerUnit
+                    double priceToUse = item.getPricePerUnit().doubleValue();
+                    try {
+                        Product product = item.getProduct();
+                        if (product != null && product.getPricePerSqftAfter() != null) {
+                            priceToUse = product.getPricePerSqftAfter().doubleValue();
+                        }
+                    } catch (Exception e) {
+                        // If product is lazy-loaded and session is closed, use stored pricePerUnit
+                        // This is expected behavior - just use the stored price
+                    }
+                    itemDTO.setPricePerUnit(priceToUse);
                     itemDTO.setQuantity(item.getQuantity().doubleValue()); // Changed to doubleValue() to support decimal quantities
                     itemDTO.setUnit(item.getUnit() != null ? item.getUnit() : "sqft"); // Default for backward compatibility
                     itemDTO.setProductImageUrl(item.getProductImageUrl());
-                    if (item.getProduct() != null) {
-                        itemDTO.setProductId(item.getProduct().getId());
+                    try {
+                        Product product = item.getProduct();
+                        if (product != null) {
+                            itemDTO.setProductId(product.getId());
+                        }
+                    } catch (Exception e) {
+                        // If product is lazy-loaded and session is closed, skip setting productId
                     }
                     return itemDTO;
                 })
@@ -511,12 +527,28 @@ public class BillService {
                     BillItemDTO itemDTO = new BillItemDTO();
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
-                    itemDTO.setPricePerUnit(item.getPricePerUnit().doubleValue());
+                    // Use pricePerSqftAfter from product if available, otherwise use stored pricePerUnit
+                    double priceToUse = item.getPricePerUnit().doubleValue();
+                    try {
+                        Product product = item.getProduct();
+                        if (product != null && product.getPricePerSqftAfter() != null) {
+                            priceToUse = product.getPricePerSqftAfter().doubleValue();
+                        }
+                    } catch (Exception e) {
+                        // If product is lazy-loaded and session is closed, use stored pricePerUnit
+                        // This is expected behavior - just use the stored price
+                    }
+                    itemDTO.setPricePerUnit(priceToUse);
                     itemDTO.setQuantity(item.getQuantity().doubleValue()); // Changed to doubleValue() to support decimal quantities
                     itemDTO.setUnit(item.getUnit() != null ? item.getUnit() : "sqft"); // Default for backward compatibility
                     itemDTO.setProductImageUrl(item.getProductImageUrl());
-                    if (item.getProduct() != null) {
-                        itemDTO.setProductId(item.getProduct().getId());
+                    try {
+                        Product product = item.getProduct();
+                        if (product != null) {
+                            itemDTO.setProductId(product.getId());
+                        }
+                    } catch (Exception e) {
+                        // If product is lazy-loaded and session is closed, skip setting productId
                     }
                     return itemDTO;
                 })

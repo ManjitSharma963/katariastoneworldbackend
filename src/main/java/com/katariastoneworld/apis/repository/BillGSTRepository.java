@@ -22,6 +22,12 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
     @Query("SELECT b FROM BillGST b WHERE b.billNumber = :billNumber AND b.customer.location = :location")
     Optional<BillGST> findByBillNumberAndCustomerLocation(@Param("billNumber") String billNumber, @Param("location") String location);
     
+    @Query("SELECT DISTINCT b FROM BillGST b LEFT JOIN FETCH b.customer LEFT JOIN FETCH b.items i LEFT JOIN FETCH i.product WHERE b.billNumber = :billNumber AND b.customer.location = :location")
+    Optional<BillGST> findByBillNumberAndCustomerLocationWithItemsAndProducts(@Param("billNumber") String billNumber, @Param("location") String location);
+    
+    @Query("SELECT DISTINCT b FROM BillGST b LEFT JOIN FETCH b.customer LEFT JOIN FETCH b.items i LEFT JOIN FETCH i.product WHERE b.id = :id")
+    Optional<BillGST> findByIdWithItemsAndProducts(@Param("id") Long id);
+    
     @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_gst b WHERE b.bill_number REGEXP '^[0-9]+$'", nativeQuery = true)
     Integer findMaxBillNumber();
 }
