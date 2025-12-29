@@ -114,20 +114,13 @@ public class BillService {
         BigDecimal taxAmount = subtotal.multiply(taxRate)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         
-        // Use provided totalAmount if available, otherwise calculate it
-        BigDecimal totalAmount;
-        if (billRequestDTO.getTotalAmount() != null) {
-            totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else {
-            // Calculate total amount: subtotal + tax + serviceCharge + labourCharge + transportationCharge - discountAmount
-            totalAmount = subtotal.add(taxAmount).add(serviceCharge)
-                    .add(labourCharge).add(transportationCharge).subtract(discountAmount);
-            if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
-                totalAmount = BigDecimal.ZERO;
-            }
-            totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        // Always calculate total amount to include all charges: subtotal + tax + serviceCharge + labourCharge + transportationCharge - discountAmount
+        BigDecimal totalAmount = subtotal.add(taxAmount).add(serviceCharge)
+                .add(labourCharge).add(transportationCharge).subtract(discountAmount);
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
         }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
         
         // Create GST Bill entity
         BillGST bill = new BillGST();
@@ -247,20 +240,13 @@ public class BillService {
                                              String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
                                              BigDecimal serviceCharge, BigDecimal labourCharge,
                                              BigDecimal transportationCharge, BigDecimal discountAmount) {
-        // Use provided totalAmount if available, otherwise calculate it (no tax)
-        BigDecimal totalAmount;
-        if (billRequestDTO.getTotalAmount() != null) {
-            totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
-                    .setScale(2, RoundingMode.HALF_UP);
-        } else {
-            // Calculate total amount (no tax): subtotal + serviceCharge + labourCharge + transportationCharge - discountAmount
-            totalAmount = subtotal.add(serviceCharge).add(labourCharge)
-                    .add(transportationCharge).subtract(discountAmount);
-            if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
-                totalAmount = BigDecimal.ZERO;
-            }
-            totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        // Always calculate total amount (no tax) to include all charges: subtotal + serviceCharge + labourCharge + transportationCharge - discountAmount
+        BigDecimal totalAmount = subtotal.add(serviceCharge).add(labourCharge)
+                .add(transportationCharge).subtract(discountAmount);
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
         }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
         
         // Create NonGST Bill entity
         BillNonGST bill = new BillNonGST();
