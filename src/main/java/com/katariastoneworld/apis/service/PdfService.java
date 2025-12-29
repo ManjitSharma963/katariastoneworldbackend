@@ -224,6 +224,8 @@ public class PdfService {
         html = html.replace("{{cgstAmount}}", DECIMAL_FORMAT_NO_DECIMAL.format(cgstAmount));
         html = html.replace("{{sgstAmount}}", DECIMAL_FORMAT_NO_DECIMAL.format(sgstAmount));
         html = html.replace("{{igstAmount}}", DECIMAL_FORMAT_NO_DECIMAL.format(igstAmount));
+        html = html.replace("{{labourCharge}}", bill.getLabourCharge() != null ? DECIMAL_FORMAT_NO_DECIMAL.format(bill.getLabourCharge()) : "0");
+        html = html.replace("{{transportationCharge}}", bill.getTransportationCharge() != null ? DECIMAL_FORMAT_NO_DECIMAL.format(bill.getTransportationCharge()) : "0");
         html = html.replace("{{totalAmount}}", bill.getTotalAmount() != null ? DECIMAL_FORMAT_NO_DECIMAL.format(bill.getTotalAmount()) : "0");
         
         // Amount in words
@@ -244,6 +246,20 @@ public class PdfService {
             html = removeConditionalBlock(html, "{{#if serviceCharge}}", "{{/if}}");
         } else {
             html = removeConditionalBlock(html, "{{#if serviceCharge}}", "{{/if}}", true);
+        }
+        
+        // Labour charge
+        if (bill.getLabourCharge() == null || bill.getLabourCharge() == 0) {
+            html = removeConditionalBlock(html, "{{#if labourCharge}}", "{{/if}}");
+        } else {
+            html = removeConditionalBlock(html, "{{#if labourCharge}}", "{{/if}}", true);
+        }
+        
+        // Transportation charge
+        if (bill.getTransportationCharge() == null || bill.getTransportationCharge() == 0) {
+            html = removeConditionalBlock(html, "{{#if transportationCharge}}", "{{/if}}");
+        } else {
+            html = removeConditionalBlock(html, "{{#if transportationCharge}}", "{{/if}}", true);
         }
         
         // CGST and SGST (same state)

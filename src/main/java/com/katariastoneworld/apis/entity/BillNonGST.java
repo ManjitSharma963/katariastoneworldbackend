@@ -51,6 +51,14 @@ public class BillNonGST {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal serviceCharge;
     
+    @NotNull(message = "Labour charge is required")
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal labourCharge = BigDecimal.ZERO;
+    
+    @NotNull(message = "Transportation charge is required")
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal transportationCharge = BigDecimal.ZERO;
+    
     @NotNull(message = "Discount amount is required")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal discountAmount;

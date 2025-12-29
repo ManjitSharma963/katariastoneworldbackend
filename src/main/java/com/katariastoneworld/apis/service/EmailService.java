@@ -213,6 +213,20 @@ public class EmailService {
             html.append("</div>");
         }
         
+        if (bill.getLabourCharge() != null && bill.getLabourCharge() > 0) {
+            html.append("<div class='summary-row'>");
+            html.append("<span>Labour Charge:</span>");
+            html.append("<span>₹").append(DECIMAL_FORMAT.format(bill.getLabourCharge())).append("</span>");
+            html.append("</div>");
+        }
+        
+        if (bill.getTransportationCharge() != null && bill.getTransportationCharge() > 0) {
+            html.append("<div class='summary-row'>");
+            html.append("<span>Transportation Charge:</span>");
+            html.append("<span>₹").append(DECIMAL_FORMAT.format(bill.getTransportationCharge())).append("</span>");
+            html.append("</div>");
+        }
+        
         if (bill.getDiscountAmount() != null && bill.getDiscountAmount() > 0) {
             html.append("<div class='summary-row'>");
             html.append("<span>Discount:</span>");

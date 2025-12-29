@@ -37,6 +37,13 @@ public class BillRequestDTO {
     @PositiveOrZero(message = "Discount amount must be positive or zero")
     private Double discountAmount;
     
+    // Optional charges
+    @PositiveOrZero(message = "Labour charge must be positive or zero")
+    private Double labourCharge;
+    
+    @PositiveOrZero(message = "Transportation charge must be positive or zero")
+    private Double transportationCharge;
+    
     // Optional: If provided, will be used; otherwise calculated
     @PositiveOrZero(message = "Total amount must be positive or zero")
     private Double totalAmount;

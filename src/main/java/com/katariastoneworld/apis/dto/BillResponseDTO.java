@@ -29,6 +29,8 @@ public class BillResponseDTO {
     private Double taxPercentage;
     private Double taxAmount;
     private Double serviceCharge;
+    private Double labourCharge;
+    private Double transportationCharge;
     private Double discountAmount;
     private Double totalAmount;
     private String paymentStatus;

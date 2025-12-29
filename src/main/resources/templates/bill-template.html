@@ -220,6 +220,18 @@
         <td class="text-right bold">{{igstAmount}}</td>
       </tr>
       {{/if}}
+      {{#if labourCharge}}
+      <tr>
+        <td colspan="5" class="text-right bold">Labour Charge</td>
+        <td class="text-right bold">{{labourCharge}}</td>
+      </tr>
+      {{/if}}
+      {{#if transportationCharge}}
+      <tr>
+        <td colspan="5" class="text-right bold">Transportation Charge</td>
+        <td class="text-right bold">{{transportationCharge}}</td>
+      </tr>
+      {{/if}}
       <tr>
         <td colspan="5" class="text-right bold">GRAND TOTAL</td>
         <td class="text-right bold">{{totalAmount}}</td>

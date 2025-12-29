@@ -71,6 +71,16 @@ public class BillService {
         // Service charge (default to 0)
         BigDecimal serviceCharge = BigDecimal.ZERO;
         
+        // Labour charge (default to 0 if null)
+        BigDecimal labourCharge = billRequestDTO.getLabourCharge() != null 
+                ? BigDecimal.valueOf(billRequestDTO.getLabourCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        
+        // Transportation charge (default to 0 if null)
+        BigDecimal transportationCharge = billRequestDTO.getTransportationCharge() != null 
+                ? BigDecimal.valueOf(billRequestDTO.getTransportationCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+        
         // Discount amount
         BigDecimal discountAmount = BigDecimal.valueOf(billRequestDTO.getDiscountAmount())
                 .setScale(2, RoundingMode.HALF_UP);
@@ -89,16 +99,17 @@ public class BillService {
         
         if (isGST) {
             return createGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal, 
-                    taxPercentage, serviceCharge, discountAmount);
+                    taxPercentage, serviceCharge, labourCharge, transportationCharge, discountAmount);
         } else {
             return createNonGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal, 
-                    serviceCharge, discountAmount);
+                    serviceCharge, labourCharge, transportationCharge, discountAmount);
         }
     }
     
     private BillResponseDTO createGSTBill(BillRequestDTO billRequestDTO, Customer customer, 
                                          String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
-                                         BigDecimal taxRate, BigDecimal serviceCharge, BigDecimal discountAmount) {
+                                         BigDecimal taxRate, BigDecimal serviceCharge, BigDecimal labourCharge,
+                                         BigDecimal transportationCharge, BigDecimal discountAmount) {
         // Calculate tax amount
         BigDecimal taxAmount = subtotal.multiply(taxRate)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
@@ -109,8 +120,9 @@ public class BillService {
             totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
                     .setScale(2, RoundingMode.HALF_UP);
         } else {
-            // Calculate total amount
-            totalAmount = subtotal.add(taxAmount).add(serviceCharge).subtract(discountAmount);
+            // Calculate total amount: subtotal + tax + serviceCharge + labourCharge + transportationCharge - discountAmount
+            totalAmount = subtotal.add(taxAmount).add(serviceCharge)
+                    .add(labourCharge).add(transportationCharge).subtract(discountAmount);
             if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
                 totalAmount = BigDecimal.ZERO;
             }
@@ -127,6 +139,8 @@ public class BillService {
         bill.setTaxRate(taxRate);
         bill.setTaxAmount(taxAmount);
         bill.setServiceCharge(serviceCharge);
+        bill.setLabourCharge(labourCharge);
+        bill.setTransportationCharge(transportationCharge);
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
@@ -231,15 +245,17 @@ public class BillService {
     
     private BillResponseDTO createNonGSTBill(BillRequestDTO billRequestDTO, Customer customer, 
                                              String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
-                                             BigDecimal serviceCharge, BigDecimal discountAmount) {
+                                             BigDecimal serviceCharge, BigDecimal labourCharge,
+                                             BigDecimal transportationCharge, BigDecimal discountAmount) {
         // Use provided totalAmount if available, otherwise calculate it (no tax)
         BigDecimal totalAmount;
         if (billRequestDTO.getTotalAmount() != null) {
             totalAmount = BigDecimal.valueOf(billRequestDTO.getTotalAmount())
                     .setScale(2, RoundingMode.HALF_UP);
         } else {
-            // Calculate total amount (no tax)
-            totalAmount = subtotal.add(serviceCharge).subtract(discountAmount);
+            // Calculate total amount (no tax): subtotal + serviceCharge + labourCharge + transportationCharge - discountAmount
+            totalAmount = subtotal.add(serviceCharge).add(labourCharge)
+                    .add(transportationCharge).subtract(discountAmount);
             if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
                 totalAmount = BigDecimal.ZERO;
             }
@@ -254,6 +270,8 @@ public class BillService {
         bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
         bill.setSubtotal(subtotal);
         bill.setServiceCharge(serviceCharge);
+        bill.setLabourCharge(labourCharge);
+        bill.setTransportationCharge(transportationCharge);
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillNonGST.PaymentStatus.PAID);
@@ -452,6 +470,8 @@ public class BillService {
         responseDTO.setTaxPercentage(bill.getTaxRate().doubleValue());
         responseDTO.setTaxAmount(bill.getTaxAmount().doubleValue());
         responseDTO.setServiceCharge(bill.getServiceCharge().doubleValue());
+        responseDTO.setLabourCharge(bill.getLabourCharge().doubleValue());
+        responseDTO.setTransportationCharge(bill.getTransportationCharge().doubleValue());
         responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
         responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
         responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
@@ -514,6 +534,8 @@ public class BillService {
         responseDTO.setTaxPercentage(0.0);
         responseDTO.setTaxAmount(0.0);
         responseDTO.setServiceCharge(bill.getServiceCharge().doubleValue());
+        responseDTO.setLabourCharge(bill.getLabourCharge().doubleValue());
+        responseDTO.setTransportationCharge(bill.getTransportationCharge().doubleValue());
         responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
         responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
         responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
