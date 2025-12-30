@@ -81,6 +81,14 @@ public class ProductRequestDTO {
     @JsonDeserialize(using = DoubleDeserializer.class)
     private Double pricePerSqftAfter;
     
+    @JsonAlias({"transportation_charge", "transportationCharge"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double transportationCharge;
+    
+    @JsonAlias({"gst_charges", "gstCharges"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double gstCharges;
+    
     // Location will be set from JWT token, not from request
     // role and userRole are from JWT token, not from request body
 }

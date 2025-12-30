@@ -30,6 +30,8 @@ public class ProductResponseDTO {
     private Double damageExpenses;
     private Double othersExpenses;
     private Double pricePerSqftAfter;
+    private Double transportationCharge;
+    private Double gstCharges;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

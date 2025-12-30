@@ -85,6 +85,12 @@ public class Product {
     @Column(name = "price_per_sqft_after", precision = 10, scale = 2)
     private BigDecimal pricePerSqftAfter;
     
+    @Column(name = "transportation_charge", precision = 10, scale = 2)
+    private BigDecimal transportationCharge;
+    
+    @Column(name = "gst_charges", precision = 10, scale = 2)
+    private BigDecimal gstCharges;
+    
     @NotBlank(message = "Location is required")
     @Column(nullable = false, length = 50)
     private String location; // Bhondsi or Tapugada
