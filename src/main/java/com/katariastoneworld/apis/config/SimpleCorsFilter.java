@@ -17,7 +17,7 @@ public class SimpleCorsFilter implements Filter {
     @Value("${cors.allow-all-origins:true}")
     private boolean allowAllOrigins;
 
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001}")
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://68.183.93.217}")
     private String allowedOriginsString;
 
     @Bean

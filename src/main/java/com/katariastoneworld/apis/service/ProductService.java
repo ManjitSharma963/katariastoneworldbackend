@@ -77,6 +77,14 @@ public class ProductService {
             product.setPricePerSqftAfter(BigDecimal.valueOf(productRequestDTO.getPricePerSqftAfter())
                     .setScale(2, RoundingMode.HALF_UP));
         }
+        if (productRequestDTO.getTransportationCharge() != null) {
+            product.setTransportationCharge(BigDecimal.valueOf(productRequestDTO.getTransportationCharge())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getGstCharges() != null) {
+            product.setGstCharges(BigDecimal.valueOf(productRequestDTO.getGstCharges())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
         
         // Set location
         product.setLocation(location);
@@ -187,6 +195,14 @@ public class ProductService {
         }
         if (productRequestDTO.getPricePerSqftAfter() != null) {
             product.setPricePerSqftAfter(BigDecimal.valueOf(productRequestDTO.getPricePerSqftAfter())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getTransportationCharge() != null) {
+            product.setTransportationCharge(BigDecimal.valueOf(productRequestDTO.getTransportationCharge())
+                    .setScale(2, RoundingMode.HALF_UP));
+        }
+        if (productRequestDTO.getGstCharges() != null) {
+            product.setGstCharges(BigDecimal.valueOf(productRequestDTO.getGstCharges())
                     .setScale(2, RoundingMode.HALF_UP));
         }
         
@@ -302,6 +318,8 @@ public class ProductService {
         responseDTO.setDamageExpenses(product.getDamageExpenses() != null ? product.getDamageExpenses().doubleValue() : null);
         responseDTO.setOthersExpenses(product.getOthersExpenses() != null ? product.getOthersExpenses().doubleValue() : null);
         responseDTO.setPricePerSqftAfter(product.getPricePerSqftAfter() != null ? product.getPricePerSqftAfter().doubleValue() : null);
+        responseDTO.setTransportationCharge(product.getTransportationCharge() != null ? product.getTransportationCharge().doubleValue() : null);
+        responseDTO.setGstCharges(product.getGstCharges() != null ? product.getGstCharges().doubleValue() : null);
         responseDTO.setCreatedAt(product.getCreatedAt());
         responseDTO.setUpdatedAt(product.getUpdatedAt());
         
