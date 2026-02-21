@@ -32,6 +32,7 @@ public class ProductResponseDTO {
     private Double pricePerSqftAfter;
     private Double transportationCharge;
     private Double gstCharges;
+    private String hsnNumber; // HSN code for GST
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

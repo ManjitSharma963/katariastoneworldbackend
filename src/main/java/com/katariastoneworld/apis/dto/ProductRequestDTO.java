@@ -89,6 +89,9 @@ public class ProductRequestDTO {
     @JsonDeserialize(using = DoubleDeserializer.class)
     private Double gstCharges;
     
+    @JsonAlias({"hsn_number", "hsnNumber"})
+    private String hsnNumber; // HSN code for GST (e.g. 2517, 6802)
+    
     // Location will be set from JWT token, not from request
     // role and userRole are from JWT token, not from request body
 }

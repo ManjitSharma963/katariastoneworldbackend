@@ -21,7 +21,7 @@ public class ExpenseRequestDTO {
     @NotBlank(message = "Category is required")
     private String category;
     
-    @NotNull(message = "Date is required")
+    // Optional: if not sent, server uses today's date (avoids timezone/date-sent-as-yesterday issues)
     private LocalDate date;
     
     private String description;

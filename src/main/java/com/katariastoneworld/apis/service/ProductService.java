@@ -85,6 +85,9 @@ public class ProductService {
             product.setGstCharges(BigDecimal.valueOf(productRequestDTO.getGstCharges())
                     .setScale(2, RoundingMode.HALF_UP));
         }
+        if (productRequestDTO.getHsnNumber() != null && !productRequestDTO.getHsnNumber().trim().isEmpty()) {
+            product.setHsnNumber(productRequestDTO.getHsnNumber().trim());
+        }
         
         // Set location
         product.setLocation(location);
@@ -205,6 +208,10 @@ public class ProductService {
             product.setGstCharges(BigDecimal.valueOf(productRequestDTO.getGstCharges())
                     .setScale(2, RoundingMode.HALF_UP));
         }
+        if (productRequestDTO.getHsnNumber() != null) {
+            product.setHsnNumber(productRequestDTO.getHsnNumber().trim().isEmpty()
+                    ? null : productRequestDTO.getHsnNumber().trim());
+        }
         
         Product updatedProduct = productRepository.save(product);
         return convertToResponseDTO(updatedProduct);
@@ -320,6 +327,7 @@ public class ProductService {
         responseDTO.setPricePerSqftAfter(product.getPricePerSqftAfter() != null ? product.getPricePerSqftAfter().doubleValue() : null);
         responseDTO.setTransportationCharge(product.getTransportationCharge() != null ? product.getTransportationCharge().doubleValue() : null);
         responseDTO.setGstCharges(product.getGstCharges() != null ? product.getGstCharges().doubleValue() : null);
+        responseDTO.setHsnNumber(product.getHsnNumber());
         responseDTO.setCreatedAt(product.getCreatedAt());
         responseDTO.setUpdatedAt(product.getUpdatedAt());
         

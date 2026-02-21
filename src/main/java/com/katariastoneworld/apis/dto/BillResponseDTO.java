@@ -31,6 +31,7 @@ public class BillResponseDTO {
     private Double serviceCharge;
     private Double labourCharge;
     private Double transportationCharge;
+    private Double otherExpenses;
     private Double discountAmount;
     private Double totalAmount;
     private String paymentStatus;

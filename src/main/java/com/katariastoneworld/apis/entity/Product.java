@@ -91,6 +91,9 @@ public class Product {
     @Column(name = "gst_charges", precision = 10, scale = 2)
     private BigDecimal gstCharges;
     
+    @Column(name = "hsn_number", length = 20)
+    private String hsnNumber; // HSN code for GST (e.g. 2517, 6802)
+    
     @NotBlank(message = "Location is required")
     @Column(nullable = false, length = 50)
     private String location; // Bhondsi or Tapugada

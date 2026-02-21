@@ -1,7 +1,6 @@
 package com.katariastoneworld.apis.entity;
 
 import jakarta.persistence.*;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -49,9 +48,9 @@ public class BillItemNonGST {
     private BigDecimal pricePerUnit; // Generic: can be per sqft, per piece, per packet, etc.
     
     @NotNull(message = "Quantity is required")
-    @Min(value = 1, message = "Quantity must be at least 1")
+    @Positive(message = "Quantity must be positive")
     @Column(name = "sqft_ordered", nullable = false, precision = 10, scale = 2)
-    private BigDecimal quantity; // Generic: can be sqft, count, packets, etc.
+    private BigDecimal quantity; // Supports decimals: sqft, count, packets, etc.
     
     @Column(length = 50)
     private String unit; // e.g., "sqft", "piece", "packet", "set", etc.

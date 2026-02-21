@@ -232,6 +232,12 @@
         <td class="text-right bold">{{transportationCharge}}</td>
       </tr>
       {{/if}}
+      {{#if otherExpenses}}
+      <tr>
+        <td colspan="5" class="text-right bold">Other Expenses</td>
+        <td class="text-right bold">{{otherExpenses}}</td>
+      </tr>
+      {{/if}}
       <tr>
         <td colspan="5" class="text-right bold">GRAND TOTAL</td>
         <td class="text-right bold">{{totalAmount}}</td>

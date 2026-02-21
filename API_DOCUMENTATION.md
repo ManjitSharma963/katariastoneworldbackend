@@ -306,7 +306,6 @@ Get a specific bill by ID.
 
 Get a bill by its type (gst/nongst) and ID.
 
-**Endpoint:** `GET /api/bills/{billType}/{id}`
 
 **Parameters:**
 - `billType`: `gst` or `nongst`

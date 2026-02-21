@@ -59,6 +59,10 @@ public class BillNonGST {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal transportationCharge = BigDecimal.ZERO;
     
+    @NotNull(message = "Other expenses is required")
+    @Column(nullable = false, precision = 10, scale = 2)
+    private BigDecimal otherExpenses = BigDecimal.ZERO;
+    
     @NotNull(message = "Discount amount is required")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal discountAmount;

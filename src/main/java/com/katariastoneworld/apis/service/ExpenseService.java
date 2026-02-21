@@ -5,9 +5,12 @@ import com.katariastoneworld.apis.dto.ExpenseResponseDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+
+import java.math.BigDecimal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -17,12 +20,16 @@ public class ExpenseService {
     
     @Autowired
     private ExpenseRepository expenseRepository;
-    
+
+    @Autowired
+    private DailyBudgetService dailyBudgetService;
+
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
         expense.setType(requestDTO.getType());
         expense.setCategory(requestDTO.getCategory());
-        expense.setDate(requestDTO.getDate());
+        // Use request date if provided; otherwise today (avoids client sending yesterday due to timezone)
+        expense.setDate(requestDTO.getDate() != null ? requestDTO.getDate() : LocalDate.now());
         expense.setDescription(requestDTO.getDescription());
         expense.setAmount(requestDTO.getAmount());
         expense.setPaymentMethod(requestDTO.getPaymentMethod());
@@ -49,6 +56,9 @@ public class ExpenseService {
         }
         
         Expense savedExpense = expenseRepository.save(expense);
+        if (LocalDate.now().equals(savedExpense.getDate()) && savedExpense.getAmount() != null) {
+            dailyBudgetService.adjustRemainingForDailyExpense(location, savedExpense.getAmount().negate());
+        }
         return convertToResponseDTO(savedExpense);
     }
     
@@ -81,7 +91,9 @@ public class ExpenseService {
         
         expense.setType(requestDTO.getType());
         expense.setCategory(requestDTO.getCategory());
-        expense.setDate(requestDTO.getDate());
+        if (requestDTO.getDate() != null) {
+            expense.setDate(requestDTO.getDate());
+        }
         expense.setDescription(requestDTO.getDescription());
         expense.setAmount(requestDTO.getAmount());
         expense.setPaymentMethod(requestDTO.getPaymentMethod());
@@ -90,7 +102,16 @@ public class ExpenseService {
         expense.setMonth(requestDTO.getMonth());
         expense.setSettled(requestDTO.getSettled());
         
+        BigDecimal oldAmount = expense.getAmount();
+        LocalDate oldDate = expense.getDate();
         Expense updatedExpense = expenseRepository.save(expense);
+        LocalDate today = LocalDate.now();
+        if (today.equals(oldDate)) {
+            dailyBudgetService.adjustRemainingForDailyExpense(location, oldAmount != null ? oldAmount : BigDecimal.ZERO);
+        }
+        if (today.equals(updatedExpense.getDate()) && updatedExpense.getAmount() != null) {
+            dailyBudgetService.adjustRemainingForDailyExpense(location, updatedExpense.getAmount().negate());
+        }
         return convertToResponseDTO(updatedExpense);
     }
     
@@ -102,7 +123,9 @@ public class ExpenseService {
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
-        
+        if (LocalDate.now().equals(expense.getDate()) && expense.getAmount() != null) {
+            dailyBudgetService.adjustRemainingForDailyExpense(location, expense.getAmount());
+        }
         expenseRepository.deleteById(id);
     }
     

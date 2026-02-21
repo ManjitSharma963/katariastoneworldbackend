@@ -4,78 +4,177 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Bill</title>
+
 <style>
   body {
-    font-family: Arial, sans-serif;
-    font-size: 14px;
+    font-family: 'Segoe UI', Arial, sans-serif;
     margin: 30px;
     color: #000;
   }
+
   .invoice-container {
-    border: 2px solid #000;
-    padding: 20px;
+    max-width: 900px;
+    margin: auto;
+    border: 1px solid #000;
+    padding: 25px;
+    position: relative;
   }
-  .header {
+
+  .top-right-info {
+    position: absolute;
+    top: 80px;
+    right: 25px;
+    text-align: right;
+    font-size: 14px;
+  }
+
+  .invoice-title {
     text-align: center;
+    font-size: 22px;
     font-weight: bold;
-    border-bottom: 2px solid #000;
-    padding-bottom: 10px;
+    margin-bottom: 40px;
+    letter-spacing: 1px;
+  }
+
+  .customer-section {
     margin-bottom: 20px;
+    font-size: 14px;
   }
-  .header h1 {
+
+  .customer-section p {
     margin: 5px 0;
-    font-size: 24px;
   }
+
+  .label {
+    font-weight: bold;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
-    margin: 20px 0;
+    margin-top: 15px;
   }
-  td, th {
+
+  th {
     border: 1px solid #000;
-    padding: 8px;
-    vertical-align: top;
+    padding: 10px;
+    font-size: 14px;
+    background-color: #f2f2f2;
   }
+
+  td {
+    border: 1px solid #000;
+    padding: 10px;
+    font-size: 14px;
+  }
+
   .text-center { text-align: center; }
   .text-right { text-align: right; }
-  .bold { font-weight: bold; }
-  .highlight {
-    background: #dbe5ff;
+
+  .totals-row td {
     font-weight: bold;
+  }
+
+  .grand-total {
+    font-size: 16px;
+    font-weight: bold;
+  }
+
+  .footer {
+    margin-top: 40px;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  @media print {
+    body {
+      margin: 0;
+    }
+    .invoice-container {
+      border: none;
+    }
   }
 </style>
 </head>
-<body>
-  <div class="invoice-container">
-    <div class="header">
-      <h1>BILL</h1>
-      <div>Bill No.: {{billNumber}}</div>
-      <div>Date: {{billDate}}</div>
-    </div>
 
-    <table>
-      <tr class="highlight text-center">
-        <th>Sr. No.</th>
-        <th>Item Name</th>
-        <th>Quantity<br />(Sq. Feet)</th>
-        <th>Rate<br />(Per Sq. Feet)</th>
-        <th>Amount<br />(In Rs.)</th>
-      </tr>
-      {{#each items}}
-      <tr>
-        <td class="text-center">{{srNo}}</td>
-        <td>{{itemName}}</td>
-        <td class="text-right">{{quantity}}</td>
-        <td class="text-right">{{pricePerUnit}}</td>
-        <td class="text-right">{{itemTotal}}</td>
-      </tr>
-      {{/each}}
-      <tr>
-        <td colspan="4" class="text-right bold">TOTAL</td>
-        <td class="text-right bold">{{totalAmount}}</td>
-      </tr>
-    </table>
+<body>
+
+<div class="invoice-container">
+
+  <!-- Bill No & Date Top Right -->
+  <div class="top-right-info">
+    <p><span class="label">Invoice No:</span> {{billNumber}}</p>
+    <p><span class="label">Date:</span> {{billDate}}</p>
   </div>
+
+  <!-- Title -->
+  <div class="invoice-title">Invoice</div>
+
+  <!-- Customer Info -->
+  <div class="customer-section">
+    <p><span class="label">Name:</span> {{customerName}}</p>
+    <p><span class="label">Mobile:</span> {{customerMobileNumber}}</p>
+    <p><span class="label">Address:</span> {{address}}</p>
+  </div>
+
+  <!-- Items Table -->
+  <table>
+    <tr>
+      <th>Sr. No.</th>
+      <th>Item Description</th>
+      <th>Quantity</th>
+      <th>Rate</th>
+      <th>Amount (₹)</th>
+    </tr>
+
+    {{#each items}}
+    <tr>
+      <td class="text-center">{{srNo}}</td>
+      <td>{{itemName}}</td>
+      <td class="text-right">{{quantity}} ({{unit}})</td>
+      <td class="text-right">{{pricePerUnit}}</td>
+      <td class="text-right">{{itemTotal}}</td>
+    </tr>
+    {{/each}}
+
+    <tr class="totals-row">
+      <td colspan="4" class="text-right">Discount Amount</td>
+      <td class="text-right">{{discountAmount}}</td>
+    </tr>
+
+    <tr class="totals-row">
+      <td colspan="4" class="text-right">Labour Charge</td>
+      <td class="text-right">{{labourCharge}}</td>
+    </tr>
+
+    <tr class="totals-row">
+      <td colspan="4" class="text-right">Transportation Charge</td>
+      <td class="text-right">{{transportationCharge}}</td>
+    </tr>
+
+    <tr class="totals-row">
+      <td colspan="4" class="text-right">Other Expenses</td>
+      <td class="text-right">{{otherExpenses}}</td>
+    </tr>
+
+    <tr class="totals-row grand-total">
+      <td colspan="4" class="text-right">TOTAL</td>
+      <td class="text-right">{{totalAmount}}</td>
+    </tr>
+
+  </table>
+
+  <div class="footer">
+    <ul>
+    <li>Goods once sold will be taken back within 10 days only.</li>
+    <li>Return will be charged 20% of the total amount.</li>
+    <li>Labour and transportation charges will be taken.</li>
+  </ul>
+  </div>
+
+
+
+</div>
+
 </body>
 </html>
-
