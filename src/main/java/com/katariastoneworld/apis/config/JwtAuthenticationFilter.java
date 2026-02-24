@@ -29,8 +29,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         "/auth/register",
         "/auth/login",
         "/auth/me",
-        "/api/inventory",
-        "/inventory",
+        // Inventory requires auth so products are filtered by user's location (JWT)
         "/api/heroes",
         "/heroes",
         "/api/categories",
@@ -124,11 +123,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return true;
         }
         
-        // For inventory, heroes, and categories - only GET requests are public
-        // POST, PUT, DELETE require authentication
-        if (isPublicPath && (normalizedPath.startsWith("/api/inventory") || 
-                             normalizedPath.startsWith("/inventory") ||
-                             normalizedPath.startsWith("/api/heroes") ||
+        // For heroes and categories - only GET requests are public
+        // Inventory requires auth so products are scoped by user location
+        if (isPublicPath && (normalizedPath.startsWith("/api/heroes") || 
                              normalizedPath.startsWith("/heroes") ||
                              normalizedPath.startsWith("/api/categories") ||
                              normalizedPath.startsWith("/categories"))) {
