@@ -118,12 +118,10 @@ public class ProductService {
     }
     
     public List<ProductResponseDTO> getAllProducts(String location) {
-        List<Product> products;
-        if (location != null && !location.trim().isEmpty()) {
-            products = productRepository.findByLocation(location);
-        } else {
-            products = productRepository.findAll();
+        if (location == null || location.trim().isEmpty()) {
+            throw new RuntimeException("Location is required to fetch products. User must be authenticated.");
         }
+        List<Product> products = productRepository.findByLocation(location);
         return products.stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());

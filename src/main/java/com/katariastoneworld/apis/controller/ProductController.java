@@ -35,53 +35,33 @@ public class ProductController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
     
+    @Operation(summary = "Get all products", description = "Returns products for the authenticated user's location only. Requires authentication.")
+    @SecurityRequirement(name = "bearerAuth")
     @GetMapping
-    public ResponseEntity<List<ProductResponseDTO>> getAllProducts(
-            @RequestParam(required = false) String location,
-            HttpServletRequest request) {
-        // If location not provided in query param, try to get from request (for authenticated users)
-        if (location == null || location.trim().isEmpty()) {
-            try {
-                location = RequestUtil.getLocationFromRequest(request);
-            } catch (Exception e) {
-                // If not authenticated and no location provided, return all products
-                location = null;
-            }
-        }
+    public ResponseEntity<List<ProductResponseDTO>> getAllProducts(HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
         List<ProductResponseDTO> products = productService.getAllProducts(location);
         return ResponseEntity.ok(products);
     }
     
+    @Operation(summary = "Get product by ID", description = "Returns the product if it belongs to the authenticated user's location.")
+    @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponseDTO> getProductById(
             @PathVariable Long id,
-            @RequestParam(required = false) String location,
             HttpServletRequest request) {
-        // If location not provided in query param, try to get from request (for authenticated users)
-        if (location == null || location.trim().isEmpty()) {
-            try {
-                location = RequestUtil.getLocationFromRequest(request);
-            } catch (Exception e) {
-                return ResponseEntity.badRequest().build();
-            }
-        }
+        String location = RequestUtil.getLocationFromRequest(request);
         ProductResponseDTO response = productService.getProductById(id, location);
         return ResponseEntity.ok(response);
     }
     
+    @Operation(summary = "Get product by slug", description = "Returns the product if it belongs to the authenticated user's location.")
+    @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/slug/{slug}")
     public ResponseEntity<ProductResponseDTO> getProductBySlug(
             @PathVariable String slug,
-            @RequestParam(required = false) String location,
             HttpServletRequest request) {
-        // If location not provided in query param, try to get from request (for authenticated users)
-        if (location == null || location.trim().isEmpty()) {
-            try {
-                location = RequestUtil.getLocationFromRequest(request);
-            } catch (Exception e) {
-                return ResponseEntity.badRequest().build();
-            }
-        }
+        String location = RequestUtil.getLocationFromRequest(request);
         ProductResponseDTO response = productService.getProductBySlug(slug, location);
         return ResponseEntity.ok(response);
     }
