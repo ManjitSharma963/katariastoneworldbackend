@@ -558,3 +558,5 @@ For issues, questions, or contributions, please contact the development team.
 **Version**: 1.0.0  
 **Last Updated**: 2024
 
+
+##docker exec -it mysql-db mysql -u appuser -papp123 katariadb
