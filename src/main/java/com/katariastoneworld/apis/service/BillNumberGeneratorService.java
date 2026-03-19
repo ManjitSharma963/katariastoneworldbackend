@@ -15,22 +15,27 @@ public class BillNumberGeneratorService {
     private BillNonGSTRepository billNonGSTRepository;
     
     /**
-     * Generate sequential bill number for GST bills (1, 2, 3, 4...)
-     * Each GST bill gets the next sequential number
+     * Generate sequential bill number for GST bills (1, 2, 3, 4...) for the given user.
+     * Each user has their own sequence, so no conflict between users.
+     * @param createdByUserId user who is creating the bill; if null, uses global max (backward compatible).
      */
-    public String generateGSTBillNumber() {
-        Integer maxBillNumber = billGSTRepository.findMaxBillNumber();
+    public String generateGSTBillNumber(Long createdByUserId) {
+        Integer maxBillNumber = (createdByUserId != null)
+                ? billGSTRepository.findMaxBillNumberByCreatedByUserId(createdByUserId)
+                : billGSTRepository.findMaxBillNumber();
         int nextNumber = (maxBillNumber == null) ? 1 : maxBillNumber + 1;
         return String.valueOf(nextNumber);
     }
-    
+
     /**
-     * Generate sequential bill number for Non-GST bills (1, 2, 3, 4...)
-     * Each Non-GST bill gets the next sequential number
-     * This is a separate series from GST bills
+     * Generate sequential bill number for Non-GST bills (1, 2, 3, 4...) for the given user.
+     * Each user has their own sequence, so no conflict between users.
+     * @param createdByUserId user who is creating the bill; if null, uses global max (backward compatible).
      */
-    public String generateNonGSTBillNumber() {
-        Integer maxBillNumber = billNonGSTRepository.findMaxBillNumber();
+    public String generateNonGSTBillNumber(Long createdByUserId) {
+        Integer maxBillNumber = (createdByUserId != null)
+                ? billNonGSTRepository.findMaxBillNumberByCreatedByUserId(createdByUserId)
+                : billNonGSTRepository.findMaxBillNumber();
         int nextNumber = (maxBillNumber == null) ? 1 : maxBillNumber + 1;
         return String.valueOf(nextNumber);
     }
@@ -41,8 +46,17 @@ public class BillNumberGeneratorService {
      */
     @Deprecated
     public String generateUniqueBillNumber() {
-        // Fallback to GST numbering for backward compatibility
-        return generateGSTBillNumber();
+        return generateGSTBillNumber(null);
+    }
+
+    /** @deprecated Use {@link #generateGSTBillNumber(Long)} with user id */
+    public String generateGSTBillNumber() {
+        return generateGSTBillNumber(null);
+    }
+
+    /** @deprecated Use {@link #generateNonGSTBillNumber(Long)} with user id */
+    public String generateNonGSTBillNumber() {
+        return generateNonGSTBillNumber(null);
     }
     
     public boolean isBillNumberExists(String billNumber) {

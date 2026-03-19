@@ -97,12 +97,12 @@ public class BillService {
         BigDecimal taxPercentage = BigDecimal.valueOf(billRequestDTO.getTaxPercentage());
         boolean isGST = taxPercentage.compareTo(BigDecimal.ZERO) > 0;
 
-        // Generate bill number based on bill type (separate series for GST and Non-GST)
+        // Generate bill number per user (latest bill number for this user + 1, no conflict between users)
         String billNumber;
         if (isGST) {
-            billNumber = billNumberGeneratorService.generateGSTBillNumber();
+            billNumber = billNumberGeneratorService.generateGSTBillNumber(createdByUserId);
         } else {
-            billNumber = billNumberGeneratorService.generateNonGSTBillNumber();
+            billNumber = billNumberGeneratorService.generateNonGSTBillNumber(createdByUserId);
         }
 
         if (isGST) {

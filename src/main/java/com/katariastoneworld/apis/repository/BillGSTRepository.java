@@ -33,5 +33,9 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
     
     @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_gst b WHERE b.bill_number REGEXP '^[0-9]+$'", nativeQuery = true)
     Integer findMaxBillNumber();
+
+    /** Max bill number for bills created by this user (per-user sequence, no conflict between users). */
+    @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_gst b WHERE b.bill_number REGEXP '^[0-9]+$' AND b.created_by_user_id = :userId", nativeQuery = true)
+    Integer findMaxBillNumberByCreatedByUserId(@Param("userId") Long userId);
 }
 
