@@ -55,7 +55,7 @@ public class ClientPurchaseController {
     
     @Operation(
             summary = "Get all client purchases",
-            description = "Get all client purchases for the authenticated user's location. Results are ordered by purchase date (newest first)."
+            description = "Get all client purchases for the location (from JWT). Location-scoped."
     )
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping
@@ -68,7 +68,7 @@ public class ClientPurchaseController {
     
     @Operation(
             summary = "Get client purchase by ID",
-            description = "Get a specific client purchase by its ID"
+            description = "Get a specific client purchase by its ID (location-scoped)"
     )
     @Parameter(name = "id", description = "Client purchase ID", required = true)
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")

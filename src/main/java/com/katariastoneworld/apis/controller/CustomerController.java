@@ -45,8 +45,9 @@ public class CustomerController {
     
     @GetMapping("/{id}")
     @RequiresRole("admin")
-    public ResponseEntity<CustomerResponseDTO> getCustomerById(@PathVariable Long id) {
-        CustomerResponseDTO customer = customerService.getCustomerById(id);
+    public ResponseEntity<CustomerResponseDTO> getCustomerById(@PathVariable Long id, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        CustomerResponseDTO customer = customerService.getCustomerById(id, location);
         return ResponseEntity.ok(customer);
     }
     
@@ -62,15 +63,18 @@ public class CustomerController {
     @RequiresRole("admin")
     public ResponseEntity<CustomerResponseDTO> updateCustomer(
             @PathVariable Long id,
-            @Valid @RequestBody CustomerRequestDTO requestDTO) {
-        CustomerResponseDTO response = customerService.updateCustomer(id, requestDTO);
+            @Valid @RequestBody CustomerRequestDTO requestDTO,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        CustomerResponseDTO response = customerService.updateCustomer(id, requestDTO, location);
         return ResponseEntity.ok(response);
     }
     
     @DeleteMapping("/{id}")
     @RequiresRole("admin")
-    public ResponseEntity<Void> deleteCustomer(@PathVariable Long id) {
-        customerService.deleteCustomer(id);
+    public ResponseEntity<Void> deleteCustomer(@PathVariable Long id, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        customerService.deleteCustomer(id, location);
         return ResponseEntity.noContent().build();
     }
 }

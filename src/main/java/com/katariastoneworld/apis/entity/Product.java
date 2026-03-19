@@ -12,7 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "products")
+@Table(name = "products", uniqueConstraints = @UniqueConstraint(columnNames = { "owner_user_id", "slug" }))
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -28,7 +28,7 @@ public class Product {
     private String name;
     
     @NotBlank(message = "Slug is required")
-    @Column(nullable = false, unique = true, length = 250)
+    @Column(nullable = false, length = 250)
     private String slug;
     
     @Column(name = "category_id", columnDefinition = "INT")
@@ -97,7 +97,11 @@ public class Product {
     @NotBlank(message = "Location is required")
     @Column(nullable = false, length = 50)
     private String location; // Bhondsi or Tapugada
-    
+
+    /** User who owns this inventory item. Data scoped per user. */
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
     

@@ -62,7 +62,11 @@ public class Expense {
     @NotBlank(message = "Location is required")
     @Column(nullable = false, length = 50)
     private String location; // Bhondsi or Tapugada
-    
+
+    /** User who owns this expense. Data scoped per user. */
+    @Column(name = "user_id")
+    private Long userId;
+
     @Column(name = "created_at", nullable = true, updatable = false, columnDefinition = "DATETIME DEFAULT CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;
     

@@ -32,60 +32,50 @@ public class CustomerService {
     }
     
     public Customer getOrCreateCustomer(String phone, String customerName, String address, String gstin, String email) {
-        return getOrCreateCustomer(phone, customerName, address, gstin, email, null);
+        return getOrCreateCustomer(phone, customerName, address, gstin, email, null, null);
     }
     
     public Customer getOrCreateCustomer(String phone, String customerName, String address, String gstin, String email, String location) {
+        return getOrCreateCustomer(phone, customerName, address, gstin, email, location, null);
+    }
+    
+    /** Location-scoped: same phone at different locations = different customers. */
+    public Customer getOrCreateCustomer(String phone, String customerName, String address, String gstin, String email, String location, Long userId) {
+        if (location != null && !location.trim().isEmpty()) {
+            return customerRepository.findByPhoneAndLocation(phone, location)
+                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
+                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, null));
+        }
+        if (userId != null) {
+            return customerRepository.findByPhoneAndUserId(phone, userId)
+                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
+                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, userId));
+        }
         return customerRepository.findByPhone(phone)
-                .map(customer -> {
-                    // Update existing customer with new details if provided
-                    boolean updated = false;
-                    if (customerName != null && !customerName.trim().isEmpty()) {
-                        customer.setCustomerName(customerName);
-                        updated = true;
-                    }
-                    if (address != null && !address.trim().isEmpty()) {
-                        customer.setAddress(address);
-                        updated = true;
-                    }
-                    if (gstin != null && !gstin.trim().isEmpty()) {
-                        customer.setGstin(gstin);
-                        updated = true;
-                    }
-                    if (email != null && !email.trim().isEmpty()) {
-                        customer.setEmail(email);
-                        updated = true;
-                    }
-                    if (location != null && !location.trim().isEmpty()) {
-                        customer.setLocation(location);
-                        updated = true;
-                    }
-                    if (updated) {
-                        return customerRepository.save(customer);
-                    }
-                    return customer;
-                })
-                .orElseGet(() -> {
-                    // Create new customer with provided details
-                    Customer customer = new Customer();
-                    customer.setPhone(phone);
-                    if (customerName != null && !customerName.trim().isEmpty()) {
-                        customer.setCustomerName(customerName);
-                    }
-                    if (address != null && !address.trim().isEmpty()) {
-                        customer.setAddress(address);
-                    }
-                    if (gstin != null && !gstin.trim().isEmpty()) {
-                        customer.setGstin(gstin);
-                    }
-                    if (email != null && !email.trim().isEmpty()) {
-                        customer.setEmail(email);
-                    }
-                    if (location != null && !location.trim().isEmpty()) {
-                        customer.setLocation(location);
-                    }
-                    return customerRepository.save(customer);
-                });
+                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
+                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, null));
+    }
+
+    private Customer updateCustomerDetails(Customer customer, String customerName, String address, String gstin, String email, String location) {
+        boolean updated = false;
+        if (customerName != null && !customerName.trim().isEmpty()) { customer.setCustomerName(customerName); updated = true; }
+        if (address != null && !address.trim().isEmpty()) { customer.setAddress(address); updated = true; }
+        if (gstin != null && !gstin.trim().isEmpty()) { customer.setGstin(gstin); updated = true; }
+        if (email != null && !email.trim().isEmpty()) { customer.setEmail(email); updated = true; }
+        if (location != null && !location.trim().isEmpty()) { customer.setLocation(location); updated = true; }
+        return updated ? customerRepository.save(customer) : customer;
+    }
+
+    private Customer createNewCustomer(String phone, String customerName, String address, String gstin, String email, String location, Long userId) {
+        Customer customer = new Customer();
+        customer.setPhone(phone);
+        customer.setUserId(userId);
+        if (customerName != null && !customerName.trim().isEmpty()) customer.setCustomerName(customerName);
+        if (address != null && !address.trim().isEmpty()) customer.setAddress(address);
+        if (gstin != null && !gstin.trim().isEmpty()) customer.setGstin(gstin);
+        if (email != null && !email.trim().isEmpty()) customer.setEmail(email);
+        if (location != null && !location.trim().isEmpty()) customer.setLocation(location);
+        return customerRepository.save(customer);
     }
     
     public Customer getCustomerByPhone(String phone) {
@@ -94,19 +84,17 @@ public class CustomerService {
     }
     
     public List<CustomerResponseDTO> getAllCustomers(String location) {
-        List<Customer> customers;
-        if (location != null && !location.trim().isEmpty()) {
-            customers = customerRepository.findByLocation(location);
-        } else {
-            customers = customerRepository.findAll();
+        if (location == null || location.trim().isEmpty()) {
+            throw new RuntimeException("Location is required to fetch customers.");
         }
+        List<Customer> customers = customerRepository.findByLocation(location);
         return customers.stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
     }
     
-    public CustomerResponseDTO getCustomerById(Long id) {
-        Customer customer = customerRepository.findById(id)
+    public CustomerResponseDTO getCustomerById(Long id, String location) {
+        Customer customer = customerRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + id));
         return convertToResponseDTO(customer);
     }
@@ -120,15 +108,13 @@ public class CustomerService {
         customer.setGstin(requestDTO.getGstin());
         customer.setEmail(requestDTO.getEmail());
         customer.setLocation(requestDTO.getLocation() != null ? requestDTO.getLocation() : location);
-        
         Customer savedCustomer = customerRepository.save(customer);
         return convertToResponseDTO(savedCustomer);
     }
     
-    public CustomerResponseDTO updateCustomer(Long id, CustomerRequestDTO requestDTO) {
-        Customer customer = customerRepository.findById(id)
+    public CustomerResponseDTO updateCustomer(Long id, CustomerRequestDTO requestDTO, String location) {
+        Customer customer = customerRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + id));
-        
         if (requestDTO.getPhone() != null && !requestDTO.getPhone().trim().isEmpty()) {
             customer.setPhone(requestDTO.getPhone());
         }
@@ -150,15 +136,13 @@ public class CustomerService {
         if (requestDTO.getLocation() != null) {
             customer.setLocation(requestDTO.getLocation());
         }
-        
         Customer updatedCustomer = customerRepository.save(customer);
         return convertToResponseDTO(updatedCustomer);
     }
     
-    public void deleteCustomer(Long id) {
-        if (!customerRepository.existsById(id)) {
-            throw new RuntimeException("Customer not found with id: " + id);
-        }
+    public void deleteCustomer(Long id, String location) {
+        Customer customer = customerRepository.findByIdAndLocation(id, location)
+                .orElseThrow(() -> new RuntimeException("Customer not found with id: " + id));
         customerRepository.deleteById(id);
     }
     

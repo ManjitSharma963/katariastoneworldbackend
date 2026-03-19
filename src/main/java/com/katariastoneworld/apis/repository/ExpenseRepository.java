@@ -10,10 +10,13 @@ import java.util.List;
 @Repository
 public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     List<Expense> findByLocation(String location);
+    List<Expense> findByLocationOrderByDateDesc(String location);
     List<Expense> findByLocationAndDateBetween(String location, LocalDate startDate, LocalDate endDate);
     List<Expense> findByLocationAndType(String location, String type);
     List<Expense> findByLocationAndCategory(String location, String category);
     List<Expense> findByLocationAndDate(String location, LocalDate date);
     List<Expense> findByLocationAndTypeAndDate(String location, String type, LocalDate date);
+    List<Expense> findByUserIdOrderByDateDesc(Long userId);
+    List<Expense> findByUserIdAndDate(Long userId, LocalDate date);
 }
 

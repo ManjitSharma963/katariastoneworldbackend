@@ -84,9 +84,13 @@ public class BillNonGST {
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemNonGST> items = new ArrayList<>();
     
+    /** User (staff) who created this bill. Enables "bills done by a specific user". */
+    @Column(name = "created_by_user_id")
+    private Long createdByUserId;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
-    
+
     @Column(nullable = false)
     private LocalDateTime updatedAt;
     

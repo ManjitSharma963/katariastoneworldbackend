@@ -18,6 +18,9 @@ public interface BillNonGSTRepository extends JpaRepository<BillNonGST, Long> {
     
     @Query("SELECT b FROM BillNonGST b WHERE b.customer.location = :location")
     List<BillNonGST> findByCustomerLocation(@Param("location") String location);
+
+    @Query("SELECT b FROM BillNonGST b WHERE b.customer.location = :location AND b.createdByUserId = :userId")
+    List<BillNonGST> findByCustomerLocationAndCreatedByUserId(@Param("location") String location, @Param("userId") Long userId);
     
     @Query("SELECT b FROM BillNonGST b WHERE b.billNumber = :billNumber AND b.customer.location = :location")
     Optional<BillNonGST> findByBillNumberAndCustomerLocation(@Param("billNumber") String billNumber, @Param("location") String location);

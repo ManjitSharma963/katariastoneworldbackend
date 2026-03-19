@@ -35,7 +35,7 @@ public class ProductController {
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
     
-    @Operation(summary = "Get all products", description = "Returns products for the authenticated user's location only. Requires authentication.")
+    @Operation(summary = "Get all products", description = "Returns all inventory for the authenticated user's location. Location-scoped.")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping
     public ResponseEntity<List<ProductResponseDTO>> getAllProducts(HttpServletRequest request) {
@@ -44,7 +44,7 @@ public class ProductController {
         return ResponseEntity.ok(products);
     }
     
-    @Operation(summary = "Get product by ID", description = "Returns the product if it belongs to the authenticated user's location.")
+    @Operation(summary = "Get product by ID", description = "Returns the product if it belongs to your location.")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponseDTO> getProductById(
@@ -55,7 +55,7 @@ public class ProductController {
         return ResponseEntity.ok(response);
     }
     
-    @Operation(summary = "Get product by slug", description = "Returns the product if it belongs to the authenticated user's location.")
+    @Operation(summary = "Get product by slug", description = "Returns the product if it belongs to your location.")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/slug/{slug}")
     public ResponseEntity<ProductResponseDTO> getProductBySlug(

@@ -45,17 +45,11 @@ public class DailyBudgetService {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Get daily budget status: budget amount, spent today (all expenses for the date), and remaining.
-     * If no budget is set, budgetAmount and remainingAmount are 0; spentAmount is still returned.
-     */
+    /** Get daily budget status for the location. Location-scoped. */
     public DailyBudgetStatusDTO getBudgetStatus(String location) {
         return getBudgetStatus(location, LocalDate.now());
     }
 
-    /**
-     * Get daily budget status for a specific date.
-     */
     public DailyBudgetStatusDTO getBudgetStatus(String location, LocalDate date) {
         BigDecimal budgetAmount = BigDecimal.ZERO;
         BigDecimal storedRemaining = null;
@@ -64,24 +58,19 @@ public class DailyBudgetService {
             budgetAmount = budget.getAmount();
             storedRemaining = budget.getRemainingBudget();
         }
-
         List<Expense> todayExpenses = expenseRepository.findByLocationAndDate(location, date);
         BigDecimal spentAmount = todayExpenses.stream()
                 .map(Expense::getAmount)
                 .filter(a -> a != null)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         BigDecimal computedRemaining = budgetAmount.subtract(spentAmount);
-        // Use stored remaining_budget when available (for carry-over); otherwise use computed
         BigDecimal remainingAmount = (storedRemaining != null && date.equals(LocalDate.now()))
                 ? storedRemaining : computedRemaining;
-        // Backfill remaining_budget for existing rows (e.g. after adding the column)
         if (budget != null && date.equals(LocalDate.now()) && budget.getRemainingBudget() == null && budget.getAmount() != null) {
             budget.setRemainingBudget(computedRemaining);
             dailyBudgetRepository.save(budget);
             remainingAmount = computedRemaining;
         }
-
         DailyBudgetStatusDTO dto = new DailyBudgetStatusDTO();
         dto.setBudgetAmount(budgetAmount);
         dto.setSpentAmount(spentAmount);
@@ -91,11 +80,6 @@ public class DailyBudgetService {
         return dto;
     }
 
-    /**
-     * Set or update daily budget for the location. Creates a new record if none exists.
-     * If a budget already exists, the amount is replaced with the new value and remaining_budget
-     * is set to (new amount - today's spent) so it stays in sync.
-     */
     public DailyBudgetStatusDTO setBudget(String location, DailyBudgetRequestDTO requestDTO) {
         BigDecimal newAmount = requestDTO.getAmount() != null ? requestDTO.getAmount() : BigDecimal.ZERO;
         DailyBudget budget = dailyBudgetRepository.findByLocation(location).orElse(null);
@@ -117,24 +101,14 @@ public class DailyBudgetService {
         return getBudgetStatus(location);
     }
 
-    /**
-     * Delete daily budget for the location. No-op if none exists.
-     * @return true if a budget was deleted, false if none existed
-     */
     public boolean deleteBudget(String location) {
         return dailyBudgetRepository.findByLocation(location)
                 .map(budget -> {
                     dailyBudgetRepository.delete(budget);
                     return true;
-                })
-                .orElse(false);
+                }).orElse(false);
     }
 
-    /**
-     * Adjust stored remaining budget when any expense is added/updated/deleted for today.
-     * @param location budget location
-     * @param delta amount to add to remaining (negative when expense added, positive when expense removed/reduced)
-     */
     public void adjustRemainingForDailyExpense(String location, BigDecimal delta) {
         if (delta == null || delta.compareTo(BigDecimal.ZERO) == 0) return;
         dailyBudgetRepository.findByLocation(location).ifPresent(budget -> {

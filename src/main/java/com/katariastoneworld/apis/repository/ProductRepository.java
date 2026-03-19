@@ -13,7 +13,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     boolean existsBySlug(String slug);
     Optional<Product> findByName(String name);
     List<Product> findByLocation(String location);
+    List<Product> findByOwnerUserId(Long ownerUserId);
     Optional<Product> findBySlugAndLocation(String slug, String location);
+    Optional<Product> findBySlugAndOwnerUserId(String slug, Long ownerUserId);
     boolean existsBySlugAndLocation(String slug, String location);
+    boolean existsBySlugAndOwnerUserId(String slug, Long ownerUserId);
 }
 

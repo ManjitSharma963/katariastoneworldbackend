@@ -38,5 +38,8 @@ public class BillResponseDTO {
     private String paymentMethod;
     private String notes;
     private LocalDateTime createdAt;
+    private Long createdByUserId; // User (staff) who created this bill
     private Boolean simpleBill = false; // Flag to indicate if this is a simple bill (no GST, no seller details)
+    /** Customer/location for this bill; used to fetch seller details for GST bill PDF. */
+    private String location;
 }

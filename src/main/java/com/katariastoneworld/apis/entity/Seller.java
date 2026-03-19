@@ -26,6 +26,10 @@ public class Seller {
     
     @Column(name="gst_no", length = 15)
     private String gstin;
+
+    /** Location (e.g. Bhondsi, Tapugada). Seller details are fetched by location for GST bills. */
+    @Column(length = 50)
+    private String location;
     
     @Column(columnDefinition = "TEXT")
     private String address;

@@ -51,8 +51,9 @@ public class BillController {
     public ResponseEntity<BillResponseDTO> createBill(@Valid @RequestBody BillRequestDTO billRequestDTO,
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
         System.out.println("Creating bill: " + billRequestDTO);
-        BillResponseDTO response = billService.createBill(billRequestDTO, location);
+        BillResponseDTO response = billService.createBill(billRequestDTO, location, userId);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
 
@@ -95,13 +96,16 @@ public class BillController {
         }
     }
 
-    @Operation(summary = "Get all bills", description = "Get all bills for the authenticated user's location. Requires admin role.")
+    @Operation(summary = "Get all bills", description = "Get all bills for the authenticated user's location. Optional query param createdBy=userId to get only bills created by that user. Requires admin role.")
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping
     @RequiresRole("admin")
-    public ResponseEntity<List<BillResponseDTO>> getAllBills(HttpServletRequest request) {
+    public ResponseEntity<List<BillResponseDTO>> getAllBills(
+            @RequestParam(required = false) Long createdBy,
+            HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
-        List<BillResponseDTO> bills = billService.getAllBills(location);
+        // By default show all bills for this location (admin + workers). Use ?createdBy=userId to filter by who created.
+        List<BillResponseDTO> bills = billService.getAllBills(location, createdBy);
         return ResponseEntity.ok(bills);
     }
 

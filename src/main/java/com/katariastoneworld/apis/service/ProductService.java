@@ -21,12 +21,9 @@ public class ProductService {
     private ProductRepository productRepository;
     
     public ProductResponseDTO createProduct(ProductRequestDTO productRequestDTO, String location) {
-        // Check if slug already exists for this location
         if (productRepository.existsBySlugAndLocation(productRequestDTO.getSlug(), location)) {
             throw new RuntimeException("Product with slug '" + productRequestDTO.getSlug() + "' already exists for location: " + location);
         }
-        
-        // Create Product entity
         Product product = new Product();
         product.setName(productRequestDTO.getName());
         product.setSlug(productRequestDTO.getSlug());
@@ -89,9 +86,7 @@ public class ProductService {
             product.setHsnNumber(productRequestDTO.getHsnNumber().trim());
         }
         
-        // Set location
         product.setLocation(location);
-        
         // Save product
         Product savedProduct = productRepository.save(product);
         
@@ -102,12 +97,9 @@ public class ProductService {
     public ProductResponseDTO getProductById(Long id, String location) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(product.getLocation())) {
             throw new RuntimeException("Product not found with id: " + id);
         }
-        
         return convertToResponseDTO(product);
     }
     
@@ -119,7 +111,7 @@ public class ProductService {
     
     public List<ProductResponseDTO> getAllProducts(String location) {
         if (location == null || location.trim().isEmpty()) {
-            throw new RuntimeException("Location is required to fetch products. User must be authenticated.");
+            throw new RuntimeException("Location is required to fetch products.");
         }
         List<Product> products = productRepository.findByLocation(location);
         return products.stream()
@@ -130,13 +122,9 @@ public class ProductService {
     public ProductResponseDTO updateProduct(Long id, ProductRequestDTO productRequestDTO, String location) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(product.getLocation())) {
             throw new RuntimeException("Product not found with id: " + id);
         }
-        
-        // Check if slug is being changed and if new slug already exists for this location
         if (!product.getSlug().equals(productRequestDTO.getSlug()) && 
             productRepository.existsBySlugAndLocation(productRequestDTO.getSlug(), location)) {
             throw new RuntimeException("Product with slug '" + productRequestDTO.getSlug() + "' already exists for location: " + location);
@@ -218,12 +206,9 @@ public class ProductService {
     public void deleteProduct(Long id, String location) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(product.getLocation())) {
             throw new RuntimeException("Product not found with id: " + id);
         }
-        
         productRepository.deleteById(id);
     }
     

@@ -28,7 +28,6 @@ public class ExpenseController {
     
     @PostMapping(consumes = "application/json")
     public ResponseEntity<ExpenseResponseDTO> createExpense(@Valid @RequestBody ExpenseRequestDTO requestDTO, HttpServletRequest request) {
-        System.out.println("Creating expense: " + requestDTO);
         String location = RequestUtil.getLocationFromRequest(request);
         ExpenseResponseDTO response = expenseService.createExpense(requestDTO, location);
         return new ResponseEntity<>(response, HttpStatus.CREATED);

@@ -33,12 +33,12 @@ public class ClientPurchaseService {
         clientPurchase.setPurchaseDate(requestDTO.getPurchaseDate());
         clientPurchase.setNotes(requestDTO.getNotes());
         clientPurchase.setLocation(location);
-        
         ClientPurchase saved = clientPurchaseRepository.save(clientPurchase);
         return convertToResponseDTO(saved);
     }
     
     public List<ClientPurchaseResponseDTO> getAllClientPurchases(String location) {
+        if (location == null || location.trim().isEmpty()) throw new RuntimeException("Location is required.");
         List<ClientPurchase> purchases = clientPurchaseRepository.findByLocationOrderByPurchaseDateDesc(location);
         return purchases.stream()
                 .map(this::convertToResponseDTO)
@@ -54,14 +54,11 @@ public class ClientPurchaseService {
     public ClientPurchaseResponseDTO updateClientPurchase(Long id, ClientPurchaseRequestDTO requestDTO, String location) {
         ClientPurchase clientPurchase = clientPurchaseRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Client purchase not found with id: " + id));
-        
         clientPurchase.setClientName(requestDTO.getClientName());
         clientPurchase.setPurchaseDescription(requestDTO.getPurchaseDescription());
         clientPurchase.setTotalAmount(requestDTO.getTotalAmount());
         clientPurchase.setPurchaseDate(requestDTO.getPurchaseDate());
         clientPurchase.setNotes(requestDTO.getNotes());
-        // Location should not be updated
-        
         ClientPurchase updated = clientPurchaseRepository.save(clientPurchase);
         return convertToResponseDTO(updated);
     }

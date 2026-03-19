@@ -24,55 +24,36 @@ public class EmployeeService {
         employee.setSalaryAmount(requestDTO.getSalaryAmount());
         employee.setJoiningDate(requestDTO.getJoiningDate());
         employee.setLocation(location);
-        
         Employee savedEmployee = employeeRepository.save(employee);
         return convertToResponseDTO(savedEmployee);
     }
     
     public List<EmployeeResponseDTO> getAllEmployees(String location) {
+        if (location == null || location.trim().isEmpty()) throw new RuntimeException("Location is required.");
         return employeeRepository.findByLocation(location).stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
     }
     
     public EmployeeResponseDTO getEmployeeById(Long id, String location) {
-        Employee employee = employeeRepository.findById(id)
+        Employee employee = employeeRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Employee not found with id: " + id));
-        
-        // Verify location matches
-        if (!location.equals(employee.getLocation())) {
-            throw new RuntimeException("Employee not found with id: " + id);
-        }
-        
         return convertToResponseDTO(employee);
     }
     
     public EmployeeResponseDTO updateEmployee(Long id, EmployeeRequestDTO requestDTO, String location) {
-        Employee employee = employeeRepository.findById(id)
+        Employee employee = employeeRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Employee not found with id: " + id));
-        
-        // Verify location matches
-        if (!location.equals(employee.getLocation())) {
-            throw new RuntimeException("Employee not found with id: " + id);
-        }
-        
         employee.setEmployeeName(requestDTO.getEmployeeName());
         employee.setSalaryAmount(requestDTO.getSalaryAmount());
         employee.setJoiningDate(requestDTO.getJoiningDate());
-        
         Employee updatedEmployee = employeeRepository.save(employee);
         return convertToResponseDTO(updatedEmployee);
     }
     
     public void deleteEmployee(Long id, String location) {
-        Employee employee = employeeRepository.findById(id)
+        Employee employee = employeeRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Employee not found with id: " + id));
-        
-        // Verify location matches
-        if (!location.equals(employee.getLocation())) {
-            throw new RuntimeException("Employee not found with id: " + id);
-        }
-        
         employeeRepository.deleteById(id);
     }
     

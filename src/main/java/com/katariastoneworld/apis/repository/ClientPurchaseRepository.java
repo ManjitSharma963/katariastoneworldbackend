@@ -17,5 +17,8 @@ public interface ClientPurchaseRepository extends JpaRepository<ClientPurchase, 
     
     @Query("SELECT cp FROM ClientPurchase cp WHERE cp.id = :id AND cp.location = :location")
     Optional<ClientPurchase> findByIdAndLocation(@Param("id") Long id, @Param("location") String location);
+    @Query("SELECT cp FROM ClientPurchase cp WHERE cp.userId = :userId ORDER BY cp.purchaseDate DESC, cp.createdAt DESC")
+    List<ClientPurchase> findByUserIdOrderByPurchaseDateDesc(@Param("userId") Long userId);
+    Optional<ClientPurchase> findByIdAndUserId(Long id, Long userId);
 }
 

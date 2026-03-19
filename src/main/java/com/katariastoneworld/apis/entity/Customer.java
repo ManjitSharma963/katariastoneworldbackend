@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "customers")
+@Table(name = "customers", uniqueConstraints = @UniqueConstraint(columnNames = { "user_id", "phone" }))
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -21,8 +21,12 @@ public class Customer {
     private Long id;
     
     @NotBlank(message = "Phone number is required")
-    @Column(nullable = false, unique = true, length = 20)
+    @Column(nullable = false, length = 20)
     private String phone;
+
+    /** User who owns this customer. Data scoped per user. */
+    @Column(name = "user_id")
+    private Long userId;
     
     @Column(name = "name", length = 200)
     private String name;

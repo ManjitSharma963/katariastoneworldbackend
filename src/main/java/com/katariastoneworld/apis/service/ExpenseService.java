@@ -28,7 +28,6 @@ public class ExpenseService {
         Expense expense = new Expense();
         expense.setType(requestDTO.getType());
         expense.setCategory(requestDTO.getCategory());
-        // Use request date if provided; otherwise today (avoids client sending yesterday due to timezone)
         expense.setDate(requestDTO.getDate() != null ? requestDTO.getDate() : LocalDate.now());
         expense.setDescription(requestDTO.getDescription());
         expense.setAmount(requestDTO.getAmount());
@@ -63,7 +62,10 @@ public class ExpenseService {
     }
     
     public List<ExpenseResponseDTO> getAllExpenses(String location) {
-        return expenseRepository.findByLocation(location).stream()
+        if (location == null || location.trim().isEmpty()) {
+            throw new RuntimeException("Location is required to fetch expenses.");
+        }
+        return expenseRepository.findByLocationOrderByDateDesc(location).stream()
                 .map(this::convertToResponseDTO)
                 .collect(Collectors.toList());
     }
@@ -71,20 +73,15 @@ public class ExpenseService {
     public ExpenseResponseDTO getExpenseById(Long id, String location) {
         Expense expense = expenseRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Expense not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
-        
         return convertToResponseDTO(expense);
     }
     
     public ExpenseResponseDTO updateExpense(Long id, ExpenseRequestDTO requestDTO, String location) {
         Expense expense = expenseRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Expense not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
@@ -118,13 +115,11 @@ public class ExpenseService {
     public void deleteExpense(Long id, String location) {
         Expense expense = expenseRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Expense not found with id: " + id));
-        
-        // Verify location matches
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
         if (LocalDate.now().equals(expense.getDate()) && expense.getAmount() != null) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, expense.getAmount());
+            dailyBudgetService.adjustRemainingForDailyExpense(expense.getLocation(), expense.getAmount());
         }
         expenseRepository.deleteById(id);
     }

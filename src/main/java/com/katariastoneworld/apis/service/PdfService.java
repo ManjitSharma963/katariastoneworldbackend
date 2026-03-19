@@ -18,6 +18,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.text.DecimalFormat;
 import java.time.format.DateTimeFormatter;
+import java.util.Optional;
 
 @Service
 public class PdfService {
@@ -36,10 +37,15 @@ public class PdfService {
         // Load HTML template
         String htmlTemplate = loadHtmlTemplate();
 
-        // Get seller details from database
-        Seller seller = sellerRepository.findFirstByOrderByIdAsc()
-                .orElseThrow(() -> new RuntimeException(
-                        "No seller information found in database. Please add seller details."));
+        // Get seller details by location (for GST bills); fallback to first seller if no location or no seller for location
+        String location = (bill != null && bill.getLocation() != null && !bill.getLocation().trim().isEmpty())
+                ? bill.getLocation().trim() : null;
+        Optional<Seller> sellerOpt = location != null ? sellerRepository.findByLocation(location) : Optional.empty();
+        if (!sellerOpt.isPresent()) {
+            sellerOpt = sellerRepository.findFirstByOrderByIdAsc();
+        }
+        Seller seller = sellerOpt.orElseThrow(() -> new RuntimeException(
+                "No seller information found for location " + (location != null ? location : "(any)") + ". Please add seller details."));
 
         // Log seller details for verification
         System.out.println("Seller details fetched:");

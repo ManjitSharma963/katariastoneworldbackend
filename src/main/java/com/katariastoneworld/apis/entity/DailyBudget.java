@@ -12,7 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "daily_budget", uniqueConstraints = @UniqueConstraint(columnNames = "location"))
+@Table(name = "daily_budget", uniqueConstraints = @UniqueConstraint(columnNames = { "user_id", "location" }))
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -23,8 +23,12 @@ public class DailyBudget {
     private Long id;
 
     @NotBlank(message = "Location is required")
-    @Column(nullable = false, unique = true, length = 50)
+    @Column(nullable = false, length = 50)
     private String location;
+
+    /** User who owns this budget. Data scoped per user. Nullable for existing rows. */
+    @Column(name = "user_id")
+    private Long userId;
 
     @NotNull(message = "Amount is required")
     @PositiveOrZero(message = "Budget amount must be positive or zero")

@@ -9,4 +9,5 @@ import java.util.Optional;
 @Repository
 public interface DailyBudgetRepository extends JpaRepository<DailyBudget, Long> {
     Optional<DailyBudget> findByLocation(String location);
+Optional<DailyBudget> findByUserIdAndLocation(Long userId, String location);
 }

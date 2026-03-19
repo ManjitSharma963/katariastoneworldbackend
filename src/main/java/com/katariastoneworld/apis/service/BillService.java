@@ -41,7 +41,7 @@ public class BillService {
     @Autowired
     private EmailService emailService;
 
-    public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location) {
+    public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId) {
         // Get or create customer with details
         System.out.println("Creating bill: service" + billRequestDTO);
         Customer customer = customerService.getOrCreateCustomer(
@@ -50,7 +50,8 @@ public class BillService {
                 billRequestDTO.getAddress(),
                 billRequestDTO.getGstin(),
                 billRequestDTO.getCustomerEmail(),
-                location);
+                location,
+                createdByUserId);
 
         // Calculate total sqft from items (quantity represents sqft)
         // Calculate total quantity (sum of all item quantities regardless of unit)
@@ -106,17 +107,17 @@ public class BillService {
 
         if (isGST) {
             return createGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal,
-                    taxPercentage, serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount);
+                    taxPercentage, serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount, createdByUserId);
         } else {
             return createNonGSTBill(billRequestDTO, customer, billNumber, totalSqft, subtotal,
-                    serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount);
+                    serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount, createdByUserId);
         }
     }
 
     private BillResponseDTO createGSTBill(BillRequestDTO billRequestDTO, Customer customer,
             String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
             BigDecimal taxRate, BigDecimal serviceCharge, BigDecimal labourCharge,
-            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount) {
+            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId) {
         // Calculate tax amount
         BigDecimal taxAmount = subtotal.multiply(taxRate)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
@@ -146,6 +147,7 @@ public class BillService {
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
+        bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
                 + ", totalAmount=" + totalAmount);
 
@@ -254,7 +256,7 @@ public class BillService {
     private BillResponseDTO createNonGSTBill(BillRequestDTO billRequestDTO, Customer customer,
             String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
             BigDecimal serviceCharge, BigDecimal labourCharge,
-            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount) {
+            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId) {
         // Always calculate total amount (no tax) to include all charges: subtotal +
         // serviceCharge + labourCharge + transportationCharge + otherExpenses - discountAmount
         BigDecimal totalAmount = subtotal.add(serviceCharge).add(labourCharge)
@@ -278,6 +280,7 @@ public class BillService {
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillNonGST.PaymentStatus.PAID);
+        bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill Non-GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
                 + ", totalAmount=" + totalAmount);
 
@@ -424,14 +427,17 @@ public class BillService {
         throw new RuntimeException("Bill not found with bill number: " + billNumber);
     }
 
-    public List<BillResponseDTO> getAllBills(String location) {
-        // Combine both GST and NonGST bills for the location, sorted by bill date (most
-        // recent first)
-        List<BillResponseDTO> gstBills = billGSTRepository.findByCustomerLocation(location).stream()
+    public List<BillResponseDTO> getAllBills(String location, Long createdByUserId) {
+        // Combine both GST and NonGST bills for the location (optionally filtered by user who created), sorted by bill date (most recent first)
+        List<BillResponseDTO> gstBills = (createdByUserId != null
+                ? billGSTRepository.findByCustomerLocationAndCreatedByUserId(location, createdByUserId)
+                : billGSTRepository.findByCustomerLocation(location)).stream()
                 .map(this::convertGSTToResponseDTO)
                 .collect(Collectors.toList());
 
-        List<BillResponseDTO> nonGstBills = billNonGSTRepository.findByCustomerLocation(location).stream()
+        List<BillResponseDTO> nonGstBills = (createdByUserId != null
+                ? billNonGSTRepository.findByCustomerLocationAndCreatedByUserId(location, createdByUserId)
+                : billNonGSTRepository.findByCustomerLocation(location)).stream()
                 .map(this::convertNonGSTToResponseDTO)
                 .collect(Collectors.toList());
 
@@ -449,7 +455,7 @@ public class BillService {
 
     public List<BillResponseDTO> getAllSales(String location) {
         // Same as getAllBills but with a dedicated method name for sales
-        return getAllBills(location);
+        return getAllBills(location, null);
     }
 
     public List<BillResponseDTO> getBillsByMobileNumber(String mobileNumber) {
@@ -494,6 +500,8 @@ public class BillService {
         responseDTO.setPaymentMethod(bill.getPaymentMethod());
         responseDTO.setNotes(bill.getNotes());
         responseDTO.setCreatedAt(bill.getCreatedAt());
+        responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
+        responseDTO.setLocation(bill.getCustomer() != null ? bill.getCustomer().getLocation() : null);
 
         // Convert items
         List<BillItemDTO> itemDTOs = bill.getItems().stream()
@@ -568,6 +576,8 @@ public class BillService {
         responseDTO.setPaymentMethod(bill.getPaymentMethod());
         responseDTO.setNotes(bill.getNotes());
         responseDTO.setCreatedAt(bill.getCreatedAt());
+        responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
+        responseDTO.setLocation(bill.getCustomer() != null ? bill.getCustomer().getLocation() : null);
 
         // Convert items
         List<BillItemDTO> itemDTOs = bill.getItems().stream()
