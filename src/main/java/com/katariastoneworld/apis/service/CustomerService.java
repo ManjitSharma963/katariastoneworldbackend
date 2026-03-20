@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,21 +40,22 @@ public class CustomerService {
         return getOrCreateCustomer(phone, customerName, address, gstin, email, location, null);
     }
     
-    /** Location-scoped: same phone at different locations = different customers. */
+    /**
+     * Get or create customer for bills. Works with existing DB that enforces UNIQUE(phone) (or similar)
+     * without requiring schema changes: always reuse the row for that phone if it exists.
+     * Location is updated when provided so listing/filtering by location stays meaningful for recent activity.
+     */
     public Customer getOrCreateCustomer(String phone, String customerName, String address, String gstin, String email, String location, Long userId) {
-        if (location != null && !location.trim().isEmpty()) {
-            return customerRepository.findByPhoneAndLocation(phone, location)
-                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
-                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, null));
+        Optional<Customer> existingByPhone = customerRepository.findByPhone(phone);
+        if (existingByPhone.isPresent()) {
+            return updateCustomerDetails(existingByPhone.get(), customerName, address, gstin, email, location);
         }
         if (userId != null) {
             return customerRepository.findByPhoneAndUserId(phone, userId)
-                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
-                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, userId));
+                    .map(c -> updateCustomerDetails(c, customerName, address, gstin, email, location))
+                    .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, userId));
         }
-        return customerRepository.findByPhone(phone)
-                .map(customer -> updateCustomerDetails(customer, customerName, address, gstin, email, location))
-                .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, null));
+        return createNewCustomer(phone, customerName, address, gstin, email, location, null);
     }
 
     private Customer updateCustomerDetails(Customer customer, String customerName, String address, String gstin, String email, String location) {
@@ -100,8 +102,23 @@ public class CustomerService {
     }
     
     public CustomerResponseDTO createCustomer(CustomerRequestDTO requestDTO, String location) {
+        String phone = requestDTO.getPhone();
+        if (phone != null && !phone.trim().isEmpty()) {
+            Optional<Customer> existing = customerRepository.findByPhone(phone.trim());
+            if (existing.isPresent()) {
+                Customer c = existing.get();
+                if (requestDTO.getName() != null) c.setName(requestDTO.getName());
+                if (requestDTO.getCustomerName() != null) c.setCustomerName(requestDTO.getCustomerName());
+                if (requestDTO.getAddress() != null) c.setAddress(requestDTO.getAddress());
+                if (requestDTO.getGstin() != null) c.setGstin(requestDTO.getGstin());
+                if (requestDTO.getEmail() != null) c.setEmail(requestDTO.getEmail());
+                String loc = requestDTO.getLocation() != null ? requestDTO.getLocation() : location;
+                if (loc != null && !loc.trim().isEmpty()) c.setLocation(loc);
+                return convertToResponseDTO(customerRepository.save(c));
+            }
+        }
         Customer customer = new Customer();
-        customer.setPhone(requestDTO.getPhone());
+        customer.setPhone(phone);
         customer.setName(requestDTO.getName());
         customer.setCustomerName(requestDTO.getCustomerName());
         customer.setAddress(requestDTO.getAddress());

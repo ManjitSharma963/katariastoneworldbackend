@@ -1,0 +1,23 @@
+-- =============================================================================
+-- Fix: Duplicate entry '...' for key 'customers.UK_...' when creating customers
+-- =============================================================================
+-- Cause:
+--   The database had a UNIQUE constraint on `phone` alone (or an old composite
+--   that does not match location-scoped logic). The API allows the same phone
+--   at different locations (Bhondsi vs Tapugada), so inserts must be unique on
+--   (location, phone), not on phone alone.
+--
+-- What to do (backup DB first):
+--   1) SHOW INDEX FROM customers;
+--   2) DROP the unique index that enforces phone-only (name from error message,
+--      e.g. UK_m3iom37efaxd5eucmxjqqcbe9).
+--   3) ADD UNIQUE (location, phone) if not already created by Hibernate.
+--
+-- If step 3 fails with "Duplicate entry", you have two rows with same
+-- location + phone — merge or delete duplicates first, or fix NULL locations.
+
+-- Example (replace index name with the one from your error / SHOW INDEX):
+-- ALTER TABLE customers DROP INDEX UK_m3iom37efaxd5eucmxjqqcbe9;
+
+-- Add composite unique (skip if Hibernate already created uk_customer_location_phone):
+-- ALTER TABLE customers ADD UNIQUE KEY uk_customer_location_phone (location, phone);
