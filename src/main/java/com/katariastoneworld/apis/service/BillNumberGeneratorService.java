@@ -7,6 +7,11 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class BillNumberGeneratorService {
+
+    /** Serialize GST number allocation (same table + unique bill_number) to avoid duplicate under concurrency. */
+    private final Object gstBillNumberLock = new Object();
+    /** Serialize Non-GST number allocation. */
+    private final Object nonGstBillNumberLock = new Object();
     
     @Autowired
     private BillGSTRepository billGSTRepository;
@@ -15,28 +20,52 @@ public class BillNumberGeneratorService {
     private BillNonGSTRepository billNonGSTRepository;
     
     /**
-     * Generate sequential bill number for GST bills (1, 2, 3, 4...) for the given user.
-     * Each user has their own sequence, so no conflict between users.
-     * @param createdByUserId user who is creating the bill; if null, uses global max (backward compatible).
+     * Generate next GST bill number. Global sequence on {@code bills_gst}; {@code createdByUserId} is not used for numbering.
+     * Uses lock + existence check so concurrent creates and odd legacy {@code bill_number} values cannot produce duplicates.
      */
     public String generateGSTBillNumber(Long createdByUserId) {
-        Integer maxBillNumber = (createdByUserId != null)
-                ? billGSTRepository.findMaxBillNumberByCreatedByUserId(createdByUserId)
-                : billGSTRepository.findMaxBillNumber();
-        int nextNumber = (maxBillNumber == null) ? 1 : maxBillNumber + 1;
-        return String.valueOf(nextNumber);
+        synchronized (gstBillNumberLock) {
+            return nextFreeNumericBillNumber(
+                    billGSTRepository::findMaxBillNumber,
+                    billGSTRepository::existsByBillNumber);
+        }
     }
 
     /**
-     * Generate sequential bill number for Non-GST bills (1, 2, 3, 4...) for the given user.
-     * Each user has their own sequence, so no conflict between users.
-     * @param createdByUserId user who is creating the bill; if null, uses global max (backward compatible).
+     * Generate next Non-GST bill number (global sequence on {@code bills_non_gst}).
      */
     public String generateNonGSTBillNumber(Long createdByUserId) {
-        Integer maxBillNumber = (createdByUserId != null)
-                ? billNonGSTRepository.findMaxBillNumberByCreatedByUserId(createdByUserId)
-                : billNonGSTRepository.findMaxBillNumber();
+        synchronized (nonGstBillNumberLock) {
+            return nextFreeNumericBillNumber(
+                    billNonGSTRepository::findMaxBillNumber,
+                    billNonGSTRepository::existsByBillNumber);
+        }
+    }
+
+    @FunctionalInterface
+    private interface MaxBillNumberQuery {
+        Integer findMax();
+    }
+
+    @FunctionalInterface
+    private interface BillNumberExistsQuery {
+        boolean exists(String billNumber);
+    }
+
+    /**
+     * Next numeric bill string: max+1 from purely numeric rows, then skip forward if that value already exists
+     * (handles gaps, legacy non-numeric rows confusing MAX, and races after unlock in other tiers).
+     */
+    private String nextFreeNumericBillNumber(MaxBillNumberQuery maxQuery, BillNumberExistsQuery existsQuery) {
+        Integer maxBillNumber = maxQuery.findMax();
         int nextNumber = (maxBillNumber == null) ? 1 : maxBillNumber + 1;
+        int guard = 0;
+        while (existsQuery.exists(String.valueOf(nextNumber)) && guard++ < 50_000) {
+            nextNumber++;
+        }
+        if (guard >= 50_000) {
+            throw new IllegalStateException("Could not allocate a free bill number after many attempts");
+        }
         return String.valueOf(nextNumber);
     }
     
