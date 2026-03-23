@@ -202,10 +202,12 @@ Create a new bill (GST or Non-GST).
   "taxPercentage": 10.0,
   "discountAmount": 40.0,
   "totalAmount": 158.0,
-  "paymentStatus": "PAID",
-  "simpleBill": false
+  "simpleBill": false,
+  "paymentMethod": "cash"
 }
 ```
+
+Optional field **`paymentMethod`**: how the customer paid (e.g. `cash`, `netbanking`, `credit`, `bank_transfer` or `bank transfer`). Max 50 characters. Stored in existing DB column `payment_method`; **omit** if not needed (backward compatible).
 
 **Response:** `201 Created`
 ```json

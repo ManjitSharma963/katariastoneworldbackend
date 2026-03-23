@@ -147,6 +147,7 @@ public class BillService {
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
+        bill.setPaymentMethod(normalizePaymentMethod(billRequestDTO.getPaymentMethod()));
         bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
                 + ", totalAmount=" + totalAmount);
@@ -280,6 +281,7 @@ public class BillService {
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillNonGST.PaymentStatus.PAID);
+        bill.setPaymentMethod(normalizePaymentMethod(billRequestDTO.getPaymentMethod()));
         bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill Non-GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
                 + ", totalAmount=" + totalAmount);
@@ -624,5 +626,14 @@ public class BillService {
         responseDTO.setItems(itemDTOs);
 
         return responseDTO;
+    }
+
+    /** Optional payment mode on bill; null/blank keeps legacy behaviour (no DB column change required). */
+    private String normalizePaymentMethod(String paymentMethod) {
+        if (paymentMethod == null) {
+            return null;
+        }
+        String t = paymentMethod.trim();
+        return t.isEmpty() ? null : t;
     }
 }

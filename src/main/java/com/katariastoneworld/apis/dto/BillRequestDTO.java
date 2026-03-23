@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -53,5 +54,13 @@ public class BillRequestDTO {
     
     // Flag to indicate if this is a simple bill (no GST, no seller details, only items and total)
     private Boolean simpleBill = false;
+
+    /**
+     * How the sale was paid (stored in {@code payment_method} on the bill). Optional.
+     * Suggested values: {@code cash}, {@code netbanking}, {@code credit}, {@code bank_transfer}
+     * (or "bank transfer" — stored as sent, max 50 chars).
+     */
+    @Size(max = 50, message = "Payment method must be at most 50 characters")
+    private String paymentMethod;
 }
 

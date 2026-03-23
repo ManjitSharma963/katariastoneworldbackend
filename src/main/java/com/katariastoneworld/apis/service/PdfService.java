@@ -140,6 +140,9 @@ public class PdfService {
         html = html.replace("{{billNumber}}", bill.getBillNumber() != null ? bill.getBillNumber() : "");
         html = html.replace("{{billDate}}",
                 bill.getBillDate() != null ? bill.getBillDate().format(DATE_FORMATTER) : "");
+        html = html.replace("{{paymentMethod}}",
+                bill.getPaymentMethod() != null && !bill.getPaymentMethod().trim().isEmpty()
+                        ? escapeHtml(bill.getPaymentMethod().trim()) : "-");
 
         // Buyer Order Info (default values - can be added to DTO later)
         html = html.replace("{{buyerOrderNo}}", "-");
@@ -429,6 +432,9 @@ public class PdfService {
         html = html.replace("{{billNumber}}", bill.getBillNumber() != null ? bill.getBillNumber() : "");
         html = html.replace("{{billDate}}",
                 bill.getBillDate() != null ? bill.getBillDate().format(DATE_FORMATTER) : "");
+        html = html.replace("{{paymentMethod}}",
+                bill.getPaymentMethod() != null && !bill.getPaymentMethod().trim().isEmpty()
+                        ? escapeHtml(bill.getPaymentMethod().trim()) : "-");
         html = html.replace("{{labourCharge}}",
                 bill.getLabourCharge() != null ? DECIMAL_FORMAT.format(bill.getLabourCharge()) : "0.00");
         html = html.replace("{{transportationCharge}}",
