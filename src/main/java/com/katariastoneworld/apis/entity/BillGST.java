@@ -88,6 +88,18 @@ public class BillGST {
     
     @Column(columnDefinition = "TEXT")
     private String notes;
+
+    /** Optional bill-level HSN (used on invoice / PDF when line items have no HSN). */
+    @Column(name = "hsn_code", length = 20)
+    private String hsnCode;
+
+    /** Vehicle / truck number for dispatch (GST invoice). */
+    @Column(name = "vehicle_no", length = 50)
+    private String vehicleNo;
+
+    /** Delivery address for this sale (may differ from customer registered address). */
+    @Column(name = "delivery_address", columnDefinition = "TEXT")
+    private String deliveryAddress;
     
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemGST> items = new ArrayList<>();

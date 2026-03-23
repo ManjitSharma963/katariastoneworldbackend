@@ -62,5 +62,16 @@ public class BillRequestDTO {
      */
     @Size(max = 50, message = "Payment method must be at most 50 characters")
     private String paymentMethod;
+
+    // --- GST bill only (ignored for Non-GST); optional ---
+
+    @Size(max = 20, message = "HSN code must be at most 20 characters")
+    private String hsnCode;
+
+    @Size(max = 50, message = "Vehicle number must be at most 50 characters")
+    private String vehicleNo;
+
+    @Size(max = 2000, message = "Delivery address must be at most 2000 characters")
+    private String deliveryAddress;
 }
 

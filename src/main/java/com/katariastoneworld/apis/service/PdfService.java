@@ -195,9 +195,12 @@ public class PdfService {
                 stateOfOrigin != null && !stateOfOrigin.isEmpty() ? stateOfOrigin : "-");
         html = html.replace("{{stateOfDestination}}",
                 stateOfDestination != null && !stateOfDestination.isEmpty() ? stateOfDestination : "-");
-        html = html.replace("{{truckNo}}", "-");
-        html = html.replace("{{placeOfSupply}}",
-                bill.getAddress() != null && bill.getAddress().contains("GURGAON") ? "GURGAON" : "-");
+        String vehicleNo = (bill.getVehicleNo() != null && !bill.getVehicleNo().trim().isEmpty())
+                ? escapeHtml(bill.getVehicleNo().trim()) : "-";
+        html = html.replace("{{truckNo}}", vehicleNo);
+        String deliveryAddr = (bill.getDeliveryAddress() != null && !bill.getDeliveryAddress().trim().isEmpty())
+                ? escapeHtml(bill.getDeliveryAddress().trim()).replace("\n", "<br />") : "-";
+        html = html.replace("{{deliveryAddress}}", deliveryAddr);
         html = html.replace("{{termsOfDelivery}}", "CREDIT");
 
         // Port of Discharge: FINAL DESTINATION [ORIGIN STATE] - [DESTINATION STATE]
@@ -360,10 +363,12 @@ public class PdfService {
                 double pricePerUnit = item.getPricePerUnit() != null ? item.getPricePerUnit() : 0.0;
                 double itemTotal = pricePerUnit * quantity;
 
-                // HSN from product in database; fallback to product ID or "-"
+                // HSN from line item / product; then bill-level hsnCode; then product id or "-"
                 String hsnCode = (item.getHsnNumber() != null && !item.getHsnNumber().trim().isEmpty())
                         ? item.getHsnNumber().trim()
-                        : (item.getProductId() != null ? String.valueOf(item.getProductId()) : "-");
+                        : (bill.getHsnCode() != null && !bill.getHsnCode().trim().isEmpty()
+                                ? bill.getHsnCode().trim()
+                                : (item.getProductId() != null ? String.valueOf(item.getProductId()) : "-"));
 
                 itemsHtml.append("<tr>");
                 itemsHtml.append("<td class=\"text-center\">").append(srNo).append("</td>");

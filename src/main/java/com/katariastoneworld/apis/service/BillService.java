@@ -148,6 +148,9 @@ public class BillService {
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
         bill.setPaymentMethod(normalizePaymentMethod(billRequestDTO.getPaymentMethod()));
+        bill.setHsnCode(trimToNull(billRequestDTO.getHsnCode()));
+        bill.setVehicleNo(trimToNull(billRequestDTO.getVehicleNo()));
+        bill.setDeliveryAddress(trimToNull(billRequestDTO.getDeliveryAddress()));
         bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
                 + ", totalAmount=" + totalAmount);
@@ -488,6 +491,9 @@ public class BillService {
         responseDTO.setGstin(bill.getCustomer().getGstin());
         responseDTO.setCustomerEmail(bill.getCustomer().getEmail());
         responseDTO.setBillDate(bill.getBillDate());
+        responseDTO.setHsnCode(bill.getHsnCode());
+        responseDTO.setVehicleNo(bill.getVehicleNo());
+        responseDTO.setDeliveryAddress(bill.getDeliveryAddress());
         responseDTO.setTotalSqft(bill.getTotalSqft().doubleValue());
         responseDTO.setSubtotal(bill.getSubtotal().doubleValue());
         responseDTO.setTaxPercentage(bill.getTaxRate().doubleValue());
@@ -542,6 +548,10 @@ public class BillService {
                         }
                     } catch (Exception e) {
                         // If product is lazy-loaded and session is closed, skip setting productId/hsnNumber
+                    }
+                    if ((itemDTO.getHsnNumber() == null || itemDTO.getHsnNumber().trim().isEmpty())
+                            && bill.getHsnCode() != null && !bill.getHsnCode().trim().isEmpty()) {
+                        itemDTO.setHsnNumber(bill.getHsnCode().trim());
                     }
                     return itemDTO;
                 })
@@ -634,6 +644,14 @@ public class BillService {
             return null;
         }
         String t = paymentMethod.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    private String trimToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
         return t.isEmpty() ? null : t;
     }
 }

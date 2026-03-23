@@ -42,4 +42,9 @@ public class BillResponseDTO {
     private Boolean simpleBill = false; // Flag to indicate if this is a simple bill (no GST, no seller details)
     /** Customer/location for this bill; used to fetch seller details for GST bill PDF. */
     private String location;
+
+    /** GST bills only: optional default HSN, vehicle no., delivery address. */
+    private String hsnCode;
+    private String vehicleNo;
+    private String deliveryAddress;
 }

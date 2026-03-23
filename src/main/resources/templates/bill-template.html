@@ -133,36 +133,35 @@
 
     <table>
       <tr>
-        <td width="50%">
+        <td width="50%" style="vertical-align: top; line-height: 1.35;">
           <strong>SELLER</strong><br />
           <strong>{{sellerName}}</strong><br />
           {{sellerAddress}}
         </td>
-        <td>
-  <!-- Sub Table 1: Invoice Details -->
-  <table class="border" width="100%">
-    <tr><td colspan="2"><b>Invoice Details</b></td></tr>
-    <tr><td><b>Invoice No.:</b></td><td>{{billNumber}}</td></tr>
-    <tr><td><b>Date:</b></td><td>{{billDate}}</td></tr>
-    <tr><td><b>Payment mode:</b></td><td>{{paymentMethod}}</td></tr>
-  </table>
-  <br />
-</td>
+        <td rowspan="3" width="50%" style="vertical-align: top;">
+          <table class="border" width="100%">
+            <tr><td colspan="2"><b>Invoice Details</b></td></tr>
+            <tr><td><b>Invoice No.:</b></td><td>{{billNumber}}</td></tr>
+            <tr><td><b>Date:</b></td><td>{{billDate}}</td></tr>
+            <tr><td><b>Payment mode:</b></td><td>{{paymentMethod}}</td></tr>
+          </table>
+          <b>Seller State GST Code</b> | {{sellerStateGstCode}}<br />
+          <hr style="margin: 4px 0; border: none; border-top: 1px solid #000;" />
+          <b>Buyer State GST Code</b> | {{buyerStateGstCode}}
+        </td>
       </tr>
-    </table>
-
-    <table>
       <tr>
-        <td width="50%">
+        <td style="vertical-align: top; line-height: 1.35;">
           <strong>Buyer / Consignee</strong><br />
           {{#if customerName}}<b>{{customerName}}</b><br />{{/if}}
           {{#if address}}{{address}}<br />{{/if}}
           {{#if gstin}}GSTIN : {{gstin}}{{/if}}
         </td>
-        <td>
-          <b>Seller State GST Code</b> | {{sellerStateGstCode}}<br />
-          <hr style="margin: 4px 0; border: none; border-top: 1px solid #000;" />
-          <b>Buyer State GST Code</b> | {{buyerStateGstCode}}
+      </tr>
+      <tr>
+        <td style="vertical-align: top; line-height: 1.35;">
+          <strong>Delivery address</strong><br />
+          {{deliveryAddress}}
         </td>
       </tr>
     </table>
@@ -175,10 +174,9 @@
         <td><b>State of Final Destination</b><br />{{stateOfDestination}}</td>
       </tr>
       <tr>
-        <td><b>Truck No.</b><br />{{truckNo}}</td>
-        <td><b>Place of Supply</b><br />{{placeOfSupply}}</td>
+        <td><b>Vehicle No.</b><br />{{truckNo}}</td>
         <td><b>Terms of Delivery and Payment</b><br />{{termsOfDelivery}}</td>
-        <td><b>Port of Discharge</b><br />{{portOfDischarge}}</td>
+        <td colspan="2"><b>Port of Discharge</b><br />{{portOfDischarge}}</td>
       </tr>
     </table>
 
