@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -53,17 +54,18 @@ public class DailyBudgetService {
     }
 
     public DailyBudgetStatusDTO getBudgetStatus(String location, LocalDate date) {
+        final String loc = location == null ? null : location.trim();
         BigDecimal budgetAmount = BigDecimal.ZERO;
         BigDecimal storedRemaining = null;
         // Prefer location-scoped row (user_id NULL) so we use the same row as in DB / UI
-        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(location)
-                .or(() -> dailyBudgetRepository.findByLocation(location))
+        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
                 .orElse(null);
         if (budget != null && budget.getAmount() != null) {
             budgetAmount = budget.getAmount();
             storedRemaining = budget.getRemainingBudget();
         }
-        List<Expense> todayExpenses = expenseRepository.findByLocationAndDate(location, date);
+        List<Expense> todayExpenses = expenseRepository.findByLocationAndDate(loc, date);
         BigDecimal spentAmount = todayExpenses.stream()
                 .map(Expense::getAmount)
                 .filter(a -> a != null)
@@ -102,23 +104,24 @@ public class DailyBudgetService {
         dto.setSpentAmount(spentAmount);
         dto.setRemainingAmount(remainingAmount);
         dto.setDate(date);
-        dto.setLocation(location);
+        dto.setLocation(loc);
         return dto;
     }
 
     public DailyBudgetStatusDTO setBudget(String location, DailyBudgetRequestDTO requestDTO) {
+        final String loc = location == null ? null : location.trim();
         BigDecimal newAmount = requestDTO.getAmount() != null ? requestDTO.getAmount() : BigDecimal.ZERO;
-        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(location)
-                .or(() -> dailyBudgetRepository.findByLocation(location))
+        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
                 .orElse(null);
         if (budget == null) {
             budget = new DailyBudget();
-            budget.setLocation(location);
+            budget.setLocation(loc);
             budget.setAmount(newAmount);
             budget.setRemainingBudget(newAmount);
         } else {
             budget.setAmount(newAmount);
-            List<Expense> todayExpenses = expenseRepository.findByLocationAndDate(location, LocalDate.now());
+            List<Expense> todayExpenses = expenseRepository.findByLocationAndDate(loc, LocalDate.now());
             BigDecimal spentToday = todayExpenses.stream()
                     .map(Expense::getAmount)
                     .filter(a -> a != null)
@@ -126,12 +129,13 @@ public class DailyBudgetService {
             budget.setRemainingBudget(newAmount.subtract(spentToday));
         }
         dailyBudgetRepository.save(budget);
-        return getBudgetStatus(location);
+        return getBudgetStatus(loc);
     }
 
     public boolean deleteBudget(String location) {
-        return dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(location)
-                .or(() -> dailyBudgetRepository.findByLocation(location))
+        final String loc = location == null ? null : location.trim();
+        return dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
                 .map(budget -> {
                     dailyBudgetRepository.delete(budget);
                     return true;
@@ -148,5 +152,34 @@ public class DailyBudgetService {
             budget.setRemainingBudget(current.add(delta));
             dailyBudgetRepository.save(budget);
         });
+    }
+
+    /**
+     * When a bill is paid in cash, add that amount to today's budget and remaining (cash in hand)
+     * for the location. Creates a daily_budget row for the location if none exists (so the UI can show updates).
+     */
+    public void recordCashCollectionFromBill(String location, BigDecimal cashAmount) {
+        if (location == null || location.isBlank() || cashAmount == null
+                || cashAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        String loc = location.trim();
+        BigDecimal add = cashAmount.setScale(2, RoundingMode.HALF_UP);
+        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
+                .orElse(null);
+        if (budget == null) {
+            budget = new DailyBudget();
+            budget.setLocation(loc);
+            budget.setUserId(null);
+            budget.setAmount(add);
+            budget.setRemainingBudget(add);
+        } else {
+            BigDecimal amt = budget.getAmount() != null ? budget.getAmount() : BigDecimal.ZERO;
+            BigDecimal rem = budget.getRemainingBudget() != null ? budget.getRemainingBudget() : amt;
+            budget.setAmount(amt.add(add));
+            budget.setRemainingBudget(rem.add(add));
+        }
+        dailyBudgetRepository.save(budget);
     }
 }

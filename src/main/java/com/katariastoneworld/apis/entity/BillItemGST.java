@@ -58,6 +58,10 @@ public class BillItemGST {
     @NotNull(message = "Item total price is required")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal itemTotalPrice;
+
+    /** Copied from {@link Product#getHsnNumber()} (inventory) when the line is saved. */
+    @Column(name = "hsn_number", length = 20)
+    private String hsnNumber;
     
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

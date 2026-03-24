@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.Locale;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,9 @@ public class BillService {
 
     @Autowired
     private EmailService emailService;
+
+    @Autowired
+    private DailyBudgetService dailyBudgetService;
 
     public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId) {
         // Get or create customer with details
@@ -148,7 +152,7 @@ public class BillService {
         bill.setTotalAmount(totalAmount);
         bill.setPaymentStatus(BillGST.PaymentStatus.PAID);
         bill.setPaymentMethod(normalizePaymentMethod(billRequestDTO.getPaymentMethod()));
-        bill.setHsnCode(trimToNull(billRequestDTO.getHsnCode()));
+        // bill-level hsnCode: set after items (from request or first product in inventory)
         bill.setVehicleNo(trimToNull(billRequestDTO.getVehicleNo()));
         bill.setDeliveryAddress(trimToNull(billRequestDTO.getDeliveryAddress()));
         bill.setCreatedByUserId(createdByUserId);
@@ -182,7 +186,8 @@ public class BillService {
             productService.validateStockAvailabilityByName(entry.getKey(), entry.getValue());
         }
 
-        // Add items to bill
+        // Add items to bill (per-line HSN from inventory product when linked)
+        String firstInventoryHsn = null;
         for (BillItemDTO itemDTO : billRequestDTO.getItems()) {
             BillItemGST item = new BillItemGST();
             item.setProductName(itemDTO.getItemName());
@@ -215,6 +220,14 @@ public class BillService {
                 }
             }
 
+            if (product != null && product.getHsnNumber() != null && !product.getHsnNumber().isBlank()) {
+                String invHsn = product.getHsnNumber().trim();
+                item.setHsnNumber(invHsn);
+                if (firstInventoryHsn == null) {
+                    firstInventoryHsn = invHsn;
+                }
+            }
+
             // Set unit from product if available, otherwise use from DTO or default to
             // "sqft"
             if (product != null && product.getUnit() != null && !product.getUnit().trim().isEmpty()) {
@@ -228,6 +241,9 @@ public class BillService {
             bill.addItem(item);
         }
 
+        String billHsnFromRequest = trimToNull(billRequestDTO.getHsnCode());
+        bill.setHsnCode(billHsnFromRequest != null ? billHsnFromRequest : firstInventoryHsn);
+
         // Save GST bill
         BillGST savedBill = billGSTRepository.save(bill);
 
@@ -240,6 +256,8 @@ public class BillService {
         for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
             productService.deductStockByName(entry.getKey(), entry.getValue());
         }
+
+        applyCashBillToDailyBudget(customer.getLocation(), bill.getPaymentMethod(), totalAmount);
 
         // Convert to response DTO
         BillResponseDTO responseDTO = convertGSTToResponseDTO(savedBill);
@@ -375,6 +393,8 @@ public class BillService {
             productService.deductStockByName(entry.getKey(), entry.getValue());
         }
 
+        applyCashBillToDailyBudget(customer.getLocation(), bill.getPaymentMethod(), totalAmount);
+
         // Convert to response DTO
         BillResponseDTO responseDTO = convertNonGSTToResponseDTO(savedBill);
         // Automatically set simpleBill to true if taxPercentage is 0, or use the flag
@@ -505,7 +525,7 @@ public class BillService {
         responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
         responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
         responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
-        responseDTO.setPaymentMethod(bill.getPaymentMethod());
+        setPaymentModeFields(responseDTO, bill.getPaymentMethod());
         responseDTO.setNotes(bill.getNotes());
         responseDTO.setCreatedAt(bill.getCreatedAt());
         responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
@@ -542,12 +562,23 @@ public class BillService {
                         Product product = item.getProduct();
                         if (product != null) {
                             itemDTO.setProductId(product.getId());
-                            if (product.getHsnNumber() != null && !product.getHsnNumber().trim().isEmpty()) {
-                                itemDTO.setHsnNumber(product.getHsnNumber().trim());
-                            }
                         }
                     } catch (Exception e) {
-                        // If product is lazy-loaded and session is closed, skip setting productId/hsnNumber
+                        // If product is lazy-loaded and session is closed, skip setting productId
+                    }
+                    // HSN: persisted on line (from inventory at bill time), then live product, then bill default
+                    if (item.getHsnNumber() != null && !item.getHsnNumber().trim().isEmpty()) {
+                        itemDTO.setHsnNumber(item.getHsnNumber().trim());
+                    } else {
+                        try {
+                            Product product = item.getProduct();
+                            if (product != null && product.getHsnNumber() != null
+                                    && !product.getHsnNumber().trim().isEmpty()) {
+                                itemDTO.setHsnNumber(product.getHsnNumber().trim());
+                            }
+                        } catch (Exception e) {
+                            // session closed
+                        }
                     }
                     if ((itemDTO.getHsnNumber() == null || itemDTO.getHsnNumber().trim().isEmpty())
                             && bill.getHsnCode() != null && !bill.getHsnCode().trim().isEmpty()) {
@@ -585,7 +616,7 @@ public class BillService {
         responseDTO.setDiscountAmount(bill.getDiscountAmount().doubleValue());
         responseDTO.setTotalAmount(bill.getTotalAmount().doubleValue());
         responseDTO.setPaymentStatus(bill.getPaymentStatus().name());
-        responseDTO.setPaymentMethod(bill.getPaymentMethod());
+        setPaymentModeFields(responseDTO, bill.getPaymentMethod());
         responseDTO.setNotes(bill.getNotes());
         responseDTO.setCreatedAt(bill.getCreatedAt());
         responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
@@ -638,6 +669,13 @@ public class BillService {
         return responseDTO;
     }
 
+    /** Sets both paymentMethod and paymentMode for list/sale APIs and UI tables. */
+    private static void setPaymentModeFields(BillResponseDTO dto, String raw) {
+        String display = (raw == null || raw.isBlank()) ? "-" : raw.trim();
+        dto.setPaymentMethod(display);
+        dto.setPaymentMode(display);
+    }
+
     /** Optional payment mode on bill; null/blank keeps legacy behaviour (no DB column change required). */
     private String normalizePaymentMethod(String paymentMethod) {
         if (paymentMethod == null) {
@@ -653,5 +691,35 @@ public class BillService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * Cash payments increase today's daily budget and remaining (cash in hand) for the bill's location.
+     */
+    private void applyCashBillToDailyBudget(String location, String paymentMethod, BigDecimal totalAmount) {
+        if (location == null || location.isBlank()) {
+            return;
+        }
+        if (!isCashPayment(paymentMethod)) {
+            return;
+        }
+        dailyBudgetService.recordCashCollectionFromBill(location.trim(), totalAmount);
+    }
+
+    /** True if payment method is cash (e.g. "cash", "Cash", "cash payment", "paid in cash"). */
+    private static boolean isCashPayment(String paymentMethod) {
+        if (paymentMethod == null || paymentMethod.isBlank()) {
+            return false;
+        }
+        String normalized = paymentMethod.trim().toLowerCase(Locale.ROOT).replace('_', ' ').replace('-', ' ');
+        if ("cash".equals(normalized)) {
+            return true;
+        }
+        for (String token : normalized.split("\\s+")) {
+            if ("cash".equals(token)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

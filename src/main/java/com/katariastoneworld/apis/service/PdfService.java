@@ -363,12 +363,12 @@ public class PdfService {
                 double pricePerUnit = item.getPricePerUnit() != null ? item.getPricePerUnit() : 0.0;
                 double itemTotal = pricePerUnit * quantity;
 
-                // HSN from line item / product; then bill-level hsnCode; then product id or "-"
+                // HSN from line (snapshot from inventory) / API; then bill-level hsnCode
                 String hsnCode = (item.getHsnNumber() != null && !item.getHsnNumber().trim().isEmpty())
                         ? item.getHsnNumber().trim()
                         : (bill.getHsnCode() != null && !bill.getHsnCode().trim().isEmpty()
                                 ? bill.getHsnCode().trim()
-                                : (item.getProductId() != null ? String.valueOf(item.getProductId()) : "-"));
+                                : "-");
 
                 itemsHtml.append("<tr>");
                 itemsHtml.append("<td class=\"text-center\">").append(srNo).append("</td>");

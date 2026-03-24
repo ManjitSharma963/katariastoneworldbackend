@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -35,7 +36,11 @@ public class BillResponseDTO {
     private Double discountAmount;
     private Double totalAmount;
     private String paymentStatus;
+    @Schema(description = "How the customer paid (e.g. cash, netbanking). \"-\" if not recorded.")
     private String paymentMethod;
+    /** Same value as {@link #paymentMethod}; use in sale tables / UI that expect this name. */
+    @Schema(description = "Payment mode (alias of paymentMethod) for sales listing.")
+    private String paymentMode;
     private String notes;
     private LocalDateTime createdAt;
     private Long createdByUserId; // User (staff) who created this bill

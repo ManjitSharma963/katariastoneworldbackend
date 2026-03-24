@@ -109,6 +109,9 @@ public class BillController {
         return ResponseEntity.ok(bills);
     }
 
+    @Operation(summary = "Get all sales", description = "All bills (GST + non-GST) for your location, same as GET /api/bills. Each item includes paymentMethod and paymentMode (same value) for sale tables.")
+    @ApiResponse(responseCode = "200", description = "Success", content = @Content(schema = @Schema(implementation = BillResponseDTO.class)))
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping("/sales")
     @RequiresRole("admin")
     public ResponseEntity<List<BillResponseDTO>> getAllSales(HttpServletRequest request) {

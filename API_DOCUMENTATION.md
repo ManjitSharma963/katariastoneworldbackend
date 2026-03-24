@@ -341,6 +341,8 @@ Get all sales (bills) for the authenticated user's location.
 
 **Response:** `200 OK` (Same format as Get All Bills)
 
+Each sale object includes **`paymentMethod`** and **`paymentMode`** (same value) so sale tables can show how the customer paid (e.g. `cash`, `netbanking`). If not stored on older bills, both are `"-"`.
+
 ---
 
 ### Get Bills by Customer Mobile Number
