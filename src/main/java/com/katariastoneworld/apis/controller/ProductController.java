@@ -1,8 +1,12 @@
 package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
+import com.katariastoneworld.apis.dto.AddStockRequestDTO;
+import com.katariastoneworld.apis.dto.InventoryHistoryResponseDTO;
+import com.katariastoneworld.apis.dto.ProductChangeHistoryResponseDTO;
 import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
+import com.katariastoneworld.apis.dto.UpdateStockRequestDTO;
 import com.katariastoneworld.apis.service.ProductService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +19,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -42,6 +47,54 @@ public class ProductController {
         String location = RequestUtil.getLocationFromRequest(request);
         List<ProductResponseDTO> products = productService.getAllProducts(location);
         return ResponseEntity.ok(products);
+    }
+
+    @Operation(summary = "Add stock manually", description = "Increases quantity on hand. Admin only. Records an ADD row in inventory history.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/add-stock")
+    @RequiresRole("admin")
+    public ResponseEntity<ProductResponseDTO> addStock(@Valid @RequestBody AddStockRequestDTO body, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        ProductResponseDTO dto = productService.addStock(
+                body.getProductId(),
+                BigDecimal.valueOf(body.getQuantity()),
+                body.getNotes(),
+                location);
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Set stock to a new quantity", description = "Manual override of on-hand quantity. Admin only. Records an UPDATE row in inventory history.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/update-stock")
+    @RequiresRole("admin")
+    public ResponseEntity<ProductResponseDTO> updateStock(@Valid @RequestBody UpdateStockRequestDTO body, HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        ProductResponseDTO dto = productService.updateStockToNewQuantity(
+                body.getProductId(),
+                BigDecimal.valueOf(body.getNewQuantity()),
+                body.getNotes(),
+                location);
+        return ResponseEntity.ok(dto);
+    }
+
+    @Operation(summary = "Stock history for a product", description = "Audit trail for the product, newest first. Empty if no movements were recorded yet.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/history/{productId}")
+    public ResponseEntity<List<InventoryHistoryResponseDTO>> getStockHistory(
+            @PathVariable Long productId,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(productService.getStockHistoryForProduct(productId, location));
+    }
+
+    @Operation(summary = "Full product edit history", description = "Snapshots before/after each PUT update (prices, GST, stock, etc.). Newest first.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/product-changes/{productId}")
+    public ResponseEntity<List<ProductChangeHistoryResponseDTO>> getProductChangeHistory(
+            @PathVariable Long productId,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(productService.getProductChangeHistory(productId, location));
     }
     
     @Operation(summary = "Get product by ID", description = "Returns the product if it belongs to your location.")

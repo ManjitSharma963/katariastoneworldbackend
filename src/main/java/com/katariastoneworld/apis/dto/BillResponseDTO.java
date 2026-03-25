@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Data
@@ -41,6 +42,15 @@ public class BillResponseDTO {
     /** Same value as {@link #paymentMethod}; use in sale tables / UI that expect this name. */
     @Schema(description = "Payment mode (alias of paymentMethod) for sales listing.")
     private String paymentMode;
+
+    /** Sum of {@code bill_payments} for this bill (legacy PAID bills without rows may infer full total). */
+    private Double totalPaid;
+
+    /** Remaining bill balance (never negative). */
+    private Double amountDue;
+
+    private List<BillPaymentResponseDTO> payments = new ArrayList<>();
+
     private String notes;
     private LocalDateTime createdAt;
     private Long createdByUserId; // User (staff) who created this bill

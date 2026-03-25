@@ -10,6 +10,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.util.List;
 
 @Data
@@ -62,6 +64,14 @@ public class BillRequestDTO {
      */
     @Size(max = 50, message = "Payment method must be at most 50 characters")
     private String paymentMethod;
+
+    /**
+     * Split payments for this bill. When non-null/non-empty, these lines are persisted
+     * to {@code bill_payments}. When omitted, legacy {@link #paymentMethod} allocates the full bill total to one mode (if set).
+     */
+    @Valid
+    @JsonAlias({ "paymentLines" })
+    private List<BillPaymentRequestDTO> payments;
 
     // --- GST bill only (ignored for Non-GST); optional ---
 

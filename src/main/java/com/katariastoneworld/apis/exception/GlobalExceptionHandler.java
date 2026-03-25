@@ -9,9 +9,22 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static void putRequestId(Map<String, String> body) {
+        body.putIfAbsent("requestId", UUID.randomUUID().toString());
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
+        Map<String, String> error = new HashMap<>();
+        error.put("error", ex.getMessage());
+        putRequestId(error);
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
     
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
@@ -19,6 +32,7 @@ public class GlobalExceptionHandler {
         ex.getBindingResult().getFieldErrors().forEach(error -> {
             errors.put(error.getField(), error.getDefaultMessage());
         });
+        putRequestId(errors);
         return new ResponseEntity<>(errors, HttpStatus.BAD_REQUEST);
     }
     
@@ -31,6 +45,7 @@ public class GlobalExceptionHandler {
         if (resourcePath == null || resourcePath.isEmpty() || resourcePath.equals(".") || resourcePath.equals("/")) {
             error.put("error", "Invalid request path. Please check your API endpoint URL.");
             error.put("message", "Available API endpoints: /api/inventory, /api/bills, /api/heroes");
+            putRequestId(error);
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
         
@@ -50,6 +65,7 @@ public class GlobalExceptionHandler {
             error.put("error", "Resource not found: " + resourcePath);
             error.put("message", "This is an API server. Static resources are not available.");
         }
+        putRequestId(error);
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
     
@@ -57,6 +73,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
         Map<String, String> error = new HashMap<>();
         error.put("error", ex.getMessage());
+        putRequestId(error);
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
     
@@ -64,6 +81,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleGenericException(Exception ex) {
         Map<String, String> error = new HashMap<>();
         error.put("error", "An unexpected error occurred: " + ex.getMessage());
+        putRequestId(error);
         return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }

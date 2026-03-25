@@ -91,6 +91,10 @@ public class ProductRequestDTO {
     
     @JsonAlias({"hsn_number", "hsnNumber"})
     private String hsnNumber; // HSN code for GST (e.g. 2517, 6802)
+
+    /** Optional audit note stored with product change history (PUT /inventory/{id}). */
+    @JsonAlias({"update_notes", "updateNotes"})
+    private String updateNotes;
     
     // Location will be set from JWT token, not from request
     // role and userRole are from JWT token, not from request body

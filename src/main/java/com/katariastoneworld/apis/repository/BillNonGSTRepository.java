@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,12 @@ public interface BillNonGSTRepository extends JpaRepository<BillNonGST, Long> {
 
     @Query("SELECT b FROM BillNonGST b WHERE b.customer.location = :location AND b.createdByUserId = :userId")
     List<BillNonGST> findByCustomerLocationAndCreatedByUserId(@Param("location") String location, @Param("userId") Long userId);
+
+    @Query("SELECT b FROM BillNonGST b JOIN b.customer c WHERE c.location = :location AND b.billDate = :date")
+    List<BillNonGST> findByCustomerLocationAndBillDate(@Param("location") String location, @Param("date") LocalDate date);
+
+    @Query("SELECT b FROM BillNonGST b JOIN b.customer c WHERE c.location = :location AND b.billDate >= :from AND b.billDate <= :to")
+    List<BillNonGST> findByCustomerLocationAndBillDateBetween(@Param("location") String location, @Param("from") LocalDate from, @Param("to") LocalDate to);
     
     @Query("SELECT b FROM BillNonGST b WHERE b.billNumber = :billNumber AND b.customer.location = :location")
     Optional<BillNonGST> findByBillNumberAndCustomerLocation(@Param("billNumber") String billNumber, @Param("location") String location);

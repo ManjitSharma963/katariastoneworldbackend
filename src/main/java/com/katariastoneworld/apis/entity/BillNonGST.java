@@ -75,7 +75,8 @@ public class BillNonGST {
     @Column(nullable = false, length = 20)
     private PaymentStatus paymentStatus = PaymentStatus.PENDING;
     
-    @Column(length = 50)
+    /** Human-readable summary of split payments; can exceed short VARCHARs — use DB migration + length here. */
+    @Column(length = 512)
     private String paymentMethod;
     
     @Column(columnDefinition = "TEXT")
@@ -119,7 +120,12 @@ public class BillNonGST {
     }
     
     public enum PaymentStatus {
-        PENDING, PARTIAL, PAID, CANCELLED
+        /** No amount recorded in {@code bill_payments} (unpaid / on credit). */
+        DUE,
+        PENDING,
+        PARTIAL,
+        PAID,
+        CANCELLED
     }
 }
 
