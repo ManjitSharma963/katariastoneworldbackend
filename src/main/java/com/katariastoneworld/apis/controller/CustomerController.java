@@ -52,8 +52,11 @@ public class CustomerController {
     }
     
     @GetMapping("/phone/{phone}")
-    @RequiresRole("admin")
+    @RequiresRole({"user", "admin"})
     public ResponseEntity<CustomerResponseDTO> getCustomerByPhone(@PathVariable String phone) {
+        if (phone == null || !phone.matches("^[0-9]{10}$")) {
+            return ResponseEntity.badRequest().build();
+        }
         com.katariastoneworld.apis.entity.Customer customer = customerService.getCustomerByPhone(phone);
         CustomerResponseDTO response = customerService.convertToResponseDTO(customer);
         return ResponseEntity.ok(response);

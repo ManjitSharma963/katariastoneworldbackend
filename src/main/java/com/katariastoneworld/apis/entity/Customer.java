@@ -45,6 +45,9 @@ public class Customer {
     
     @Column(length = 50)
     private String location; // Bhondsi or Tapugada - optional, can be set when creating customer
+
+    @Column(columnDefinition = "TEXT")
+    private String notes;
     
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

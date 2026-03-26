@@ -95,6 +95,19 @@ public class ProductRequestDTO {
     /** Optional audit note stored with product change history (PUT /inventory/{id}). */
     @JsonAlias({"update_notes", "updateNotes"})
     private String updateNotes;
+
+    /**
+     * Optional supplier (firm). On create: omit, null, or non-positive = none.
+     * On update: omit or null = keep existing; non-positive = clear; positive = set.
+     */
+    @JsonAlias({"supplier_id", "supplierId"})
+    private Long supplierId;
+
+    /**
+     * Optional dealer (middleman). Same semantics as {@link #supplierId} on create/update.
+     */
+    @JsonAlias({"dealer_id", "dealerId"})
+    private Long dealerId;
     
     // Location will be set from JWT token, not from request
     // role and userRole are from JWT token, not from request body

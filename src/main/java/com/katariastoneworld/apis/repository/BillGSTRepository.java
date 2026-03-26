@@ -17,6 +17,21 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
     Optional<BillGST> findByBillNumber(String billNumber);
     boolean existsByBillNumber(String billNumber);
     
+    /**
+     * Location-scoped listing. For legacy rows where {@code b.location} is null, fallback to {@code customer.location}.
+     */
+    @Query("SELECT b FROM BillGST b WHERE (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))")
+    List<BillGST> findByBillLocation(@Param("location") String location);
+
+    @Query("SELECT b FROM BillGST b WHERE (b.location = :location OR (b.location IS NULL AND b.customer.location = :location)) AND b.createdByUserId = :userId")
+    List<BillGST> findByBillLocationAndCreatedByUserId(@Param("location") String location, @Param("userId") Long userId);
+
+    @Query("SELECT b FROM BillGST b WHERE b.billNumber = :billNumber AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))")
+    Optional<BillGST> findByBillNumberAndBillLocation(@Param("billNumber") String billNumber, @Param("location") String location);
+
+    @Query("SELECT DISTINCT b FROM BillGST b LEFT JOIN FETCH b.customer LEFT JOIN FETCH b.items i LEFT JOIN FETCH i.product WHERE b.billNumber = :billNumber AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))")
+    Optional<BillGST> findByBillNumberAndBillLocationWithItemsAndProducts(@Param("billNumber") String billNumber, @Param("location") String location);
+
     @Query("SELECT b FROM BillGST b WHERE b.customer.location = :location")
     List<BillGST> findByCustomerLocation(@Param("location") String location);
 
@@ -28,6 +43,9 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
 
     @Query("SELECT b FROM BillGST b JOIN b.customer c WHERE c.location = :location AND b.billDate >= :from AND b.billDate <= :to")
     List<BillGST> findByCustomerLocationAndBillDateBetween(@Param("location") String location, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("SELECT b FROM BillGST b WHERE (b.location = :location OR (b.location IS NULL AND b.customer.location = :location)) AND b.billDate >= :from AND b.billDate <= :to")
+    List<BillGST> findByBillLocationAndBillDateBetween(@Param("location") String location, @Param("from") LocalDate from, @Param("to") LocalDate to);
     
     @Query("SELECT b FROM BillGST b WHERE b.billNumber = :billNumber AND b.customer.location = :location")
     Optional<BillGST> findByBillNumberAndCustomerLocation(@Param("billNumber") String billNumber, @Param("location") String location);
@@ -40,6 +58,18 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
     
     @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_gst b WHERE b.bill_number REGEXP '^[0-9]+$'", nativeQuery = true)
     Integer findMaxBillNumber();
+
+    /**
+     * Max numeric suffix for prefixed bill numbers like {@code BHO-U3-12}.
+     * {@code prefix} should include trailing '-' (e.g. {@code BHO-U3-}).
+     */
+    @Query(value = """
+            SELECT MAX(CAST(SUBSTRING(b.bill_number, CHAR_LENGTH(:prefix) + 1) AS UNSIGNED))
+            FROM bills_gst b
+            WHERE b.bill_number LIKE CONCAT(:prefix, '%')
+              AND SUBSTRING(b.bill_number, CHAR_LENGTH(:prefix) + 1) REGEXP '^[0-9]+$'
+            """, nativeQuery = true)
+    Integer findMaxBillNumberForPrefix(@Param("prefix") String prefix);
 
     /** Max bill number for bills created by this user (per-user sequence, no conflict between users). */
     @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_gst b WHERE b.bill_number REGEXP '^[0-9]+$' AND b.created_by_user_id = :userId", nativeQuery = true)

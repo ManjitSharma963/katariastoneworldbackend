@@ -28,6 +28,12 @@ public class ProductService {
 
     @Autowired
     private ProductChangeHistoryService productChangeHistoryService;
+
+    @Autowired
+    private SupplierService supplierService;
+
+    @Autowired
+    private DealerService dealerService;
     
     public ProductResponseDTO createProduct(ProductRequestDTO productRequestDTO, String location) {
         if (productRepository.existsBySlugAndLocation(productRequestDTO.getSlug(), location)) {
@@ -94,13 +100,53 @@ public class ProductService {
         if (productRequestDTO.getHsnNumber() != null && !productRequestDTO.getHsnNumber().trim().isEmpty()) {
             product.setHsnNumber(productRequestDTO.getHsnNumber().trim());
         }
+
+        applySupplierDealerOnCreate(product, productRequestDTO, location);
         
         product.setLocation(location);
         // Save product
         Product savedProduct = productRepository.save(product);
-        
-        // Convert to response DTO
-        return convertToResponseDTO(savedProduct);
+
+        // Store an initial product snapshot so history details (price/GST/supplier/dealer) are visible from day 1.
+        // We also include a "before" snapshot with quantity=0 so the UI can compute Stock Δ and show one clean row.
+        ProductResponseDTO createdSnapshot = convertToResponseDTO(savedProduct);
+        ProductResponseDTO beforeSnapshot = new ProductResponseDTO();
+        beforeSnapshot.setId(createdSnapshot.getId());
+        beforeSnapshot.setName(createdSnapshot.getName());
+        beforeSnapshot.setSlug(createdSnapshot.getSlug());
+        beforeSnapshot.setCategoryId(createdSnapshot.getCategoryId());
+        beforeSnapshot.setProductType(createdSnapshot.getProductType());
+        beforeSnapshot.setColor(createdSnapshot.getColor());
+        beforeSnapshot.setPricePerUnit(createdSnapshot.getPricePerUnit());
+        beforeSnapshot.setQuantity(0.0);
+        beforeSnapshot.setUnit(createdSnapshot.getUnit());
+        beforeSnapshot.setPrimaryImageUrl(createdSnapshot.getPrimaryImageUrl());
+        beforeSnapshot.setDescription(createdSnapshot.getDescription());
+        beforeSnapshot.setIsFeatured(createdSnapshot.getIsFeatured());
+        beforeSnapshot.setIsActive(createdSnapshot.getIsActive());
+        beforeSnapshot.setMetaKeywords(createdSnapshot.getMetaKeywords());
+        beforeSnapshot.setLabourCharges(createdSnapshot.getLabourCharges());
+        beforeSnapshot.setRtoFees(createdSnapshot.getRtoFees());
+        beforeSnapshot.setDamageExpenses(createdSnapshot.getDamageExpenses());
+        beforeSnapshot.setOthersExpenses(createdSnapshot.getOthersExpenses());
+        beforeSnapshot.setPricePerSqftAfter(createdSnapshot.getPricePerSqftAfter());
+        beforeSnapshot.setTransportationCharge(createdSnapshot.getTransportationCharge());
+        beforeSnapshot.setGstCharges(createdSnapshot.getGstCharges());
+        beforeSnapshot.setHsnNumber(createdSnapshot.getHsnNumber());
+        beforeSnapshot.setSupplierId(createdSnapshot.getSupplierId());
+        beforeSnapshot.setDealerId(createdSnapshot.getDealerId());
+        beforeSnapshot.setSupplierName(createdSnapshot.getSupplierName());
+        beforeSnapshot.setDealerName(createdSnapshot.getDealerName());
+        beforeSnapshot.setCreatedAt(createdSnapshot.getCreatedAt());
+        beforeSnapshot.setUpdatedAt(createdSnapshot.getUpdatedAt());
+
+        productChangeHistoryService.recordChange(
+                savedProduct.getId(),
+                beforeSnapshot,
+                createdSnapshot,
+                "Initial product details on creation");
+
+        return createdSnapshot;
     }
     
     public ProductResponseDTO getProductById(Long id, String location) {
@@ -209,6 +255,8 @@ public class ProductService {
             product.setHsnNumber(productRequestDTO.getHsnNumber().trim().isEmpty()
                     ? null : productRequestDTO.getHsnNumber().trim());
         }
+
+        applySupplierDealerOnUpdate(product, productRequestDTO, location);
         
         Product updatedProduct = productRepository.save(product);
         ProductResponseDTO afterSnapshot = convertToResponseDTO(updatedProduct);
@@ -222,6 +270,44 @@ public class ProductService {
         recordQuantityDeltaIfChanged(id, beforeSnapshot, afterSnapshot, productRequestDTO.getUpdateNotes());
 
         return afterSnapshot;
+    }
+
+    /** Create: only positive ids link; null, omitted, or non-positive leaves association unset. */
+    private void applySupplierDealerOnCreate(Product product, ProductRequestDTO dto, String location) {
+        Long sid = dto.getSupplierId();
+        if (sid != null && sid > 0) {
+            product.setSupplier(supplierService.requireForProduct(sid, location));
+        } else {
+            product.setSupplier(null);
+        }
+        Long did = dto.getDealerId();
+        if (did != null && did > 0) {
+            product.setDealer(dealerService.requireForProduct(did, location));
+        } else {
+            product.setDealer(null);
+        }
+    }
+
+    /**
+     * Update: null/omitted on DTO = do not change; non-positive = clear; positive = set (validated for location).
+     */
+    private void applySupplierDealerOnUpdate(Product product, ProductRequestDTO dto, String location) {
+        Long sid = dto.getSupplierId();
+        if (sid != null) {
+            if (sid <= 0) {
+                product.setSupplier(null);
+            } else {
+                product.setSupplier(supplierService.requireForProduct(sid, location));
+            }
+        }
+        Long did = dto.getDealerId();
+        if (did != null) {
+            if (did <= 0) {
+                product.setDealer(null);
+            } else {
+                product.setDealer(dealerService.requireForProduct(did, location));
+            }
+        }
     }
 
     private void recordQuantityDeltaIfChanged(Long productId, ProductResponseDTO before, ProductResponseDTO after, String updateNotes) {
@@ -438,6 +524,20 @@ public class ProductService {
         responseDTO.setTransportationCharge(product.getTransportationCharge() != null ? product.getTransportationCharge().doubleValue() : null);
         responseDTO.setGstCharges(product.getGstCharges() != null ? product.getGstCharges().doubleValue() : null);
         responseDTO.setHsnNumber(product.getHsnNumber());
+        if (product.getSupplier() != null) {
+            responseDTO.setSupplierId(product.getSupplier().getId());
+            responseDTO.setSupplierName(product.getSupplier().getName());
+        } else {
+            responseDTO.setSupplierId(null);
+            responseDTO.setSupplierName(null);
+        }
+        if (product.getDealer() != null) {
+            responseDTO.setDealerId(product.getDealer().getId());
+            responseDTO.setDealerName(product.getDealer().getName());
+        } else {
+            responseDTO.setDealerId(null);
+            responseDTO.setDealerName(null);
+        }
         responseDTO.setCreatedAt(product.getCreatedAt());
         responseDTO.setUpdatedAt(product.getUpdatedAt());
         

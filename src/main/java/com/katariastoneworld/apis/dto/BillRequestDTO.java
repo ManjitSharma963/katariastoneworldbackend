@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -20,6 +21,7 @@ import java.util.List;
 public class BillRequestDTO {
     
     @NotBlank(message = "Customer mobile number is required")
+    @Pattern(regexp = "^[0-9]{10}$", message = "Customer mobile number must be exactly 10 digits")
     private String customerMobileNumber;
     
     // Optional customer details

@@ -20,24 +20,26 @@ public class BillNumberGeneratorService {
     private BillNonGSTRepository billNonGSTRepository;
     
     /**
-     * Generate next GST bill number. Global sequence on {@code bills_gst}; {@code createdByUserId} is not used for numbering.
+     * Generate next GST bill number. Location + createdByUserId scoped series (e.g. BHO-U3-1, TAP-U5-1).
      * Uses lock + existence check so concurrent creates and odd legacy {@code bill_number} values cannot produce duplicates.
      */
-    public String generateGSTBillNumber(Long createdByUserId) {
+    public String generateGSTBillNumber(String location, Long createdByUserId) {
         synchronized (gstBillNumberLock) {
-            return nextFreeNumericBillNumber(
-                    billGSTRepository::findMaxBillNumber,
+            String prefix = locationPrefix(location) + "-U" + safeUserId(createdByUserId) + "-";
+            return nextFreePrefixedBillNumber(
+                    prefix,
+                    () -> billGSTRepository.findMaxBillNumberForPrefix(prefix),
                     billGSTRepository::existsByBillNumber);
         }
     }
 
-    /**
-     * Generate next Non-GST bill number (global sequence on {@code bills_non_gst}).
-     */
-    public String generateNonGSTBillNumber(Long createdByUserId) {
+    /** Generate next Non-GST bill number (location + createdByUserId scoped). */
+    public String generateNonGSTBillNumber(String location, Long createdByUserId) {
         synchronized (nonGstBillNumberLock) {
-            return nextFreeNumericBillNumber(
-                    billNonGSTRepository::findMaxBillNumber,
+            String prefix = locationPrefix(location) + "-U" + safeUserId(createdByUserId) + "-";
+            return nextFreePrefixedBillNumber(
+                    prefix,
+                    () -> billNonGSTRepository.findMaxBillNumberForPrefix(prefix),
                     billNonGSTRepository::existsByBillNumber);
         }
     }
@@ -68,6 +70,34 @@ public class BillNumberGeneratorService {
         }
         return String.valueOf(nextNumber);
     }
+
+    private String nextFreePrefixedBillNumber(String prefix, MaxBillNumberQuery maxQuery, BillNumberExistsQuery existsQuery) {
+        Integer max = maxQuery.findMax();
+        int nextNumber = (max == null) ? 1 : max + 1;
+        int guard = 0;
+        while (existsQuery.exists(prefix + nextNumber) && guard++ < 50_000) {
+            nextNumber++;
+        }
+        if (guard >= 50_000) {
+            throw new IllegalStateException("Could not allocate a free bill number after many attempts");
+        }
+        return prefix + nextNumber;
+    }
+
+    private static String locationPrefix(String location) {
+        if (location == null) return "LOC";
+        String l = location.trim().toLowerCase();
+        if (l.isEmpty()) return "LOC";
+        if (l.startsWith("bhondsi")) return "BHO";
+        if (l.startsWith("tapugada")) return "TAP";
+        String letters = l.replaceAll("[^a-z0-9]", "");
+        if (letters.length() >= 3) return letters.substring(0, 3).toUpperCase();
+        return letters.toUpperCase();
+    }
+
+    private static long safeUserId(Long userId) {
+        return userId != null && userId > 0 ? userId : 0L;
+    }
     
     /**
      * @deprecated Use generateGSTBillNumber() or generateNonGSTBillNumber() instead
@@ -75,17 +105,17 @@ public class BillNumberGeneratorService {
      */
     @Deprecated
     public String generateUniqueBillNumber() {
-        return generateGSTBillNumber(null);
+        return generateGSTBillNumber(null, null);
     }
 
-    /** @deprecated Use {@link #generateGSTBillNumber(Long)} with user id */
+    /** @deprecated Use {@link #generateGSTBillNumber(String, Long)} */
     public String generateGSTBillNumber() {
-        return generateGSTBillNumber(null);
+        return generateGSTBillNumber(null, null);
     }
 
-    /** @deprecated Use {@link #generateNonGSTBillNumber(Long)} with user id */
+    /** @deprecated Use {@link #generateNonGSTBillNumber(String, Long)} */
     public String generateNonGSTBillNumber() {
-        return generateNonGSTBillNumber(null);
+        return generateNonGSTBillNumber(null, null);
     }
     
     public boolean isBillNumberExists(String billNumber) {

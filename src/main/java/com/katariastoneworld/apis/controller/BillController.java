@@ -122,8 +122,13 @@ public class BillController {
 
     @GetMapping("/customer/{mobileNumber}")
     @RequiresRole("admin")
-    public ResponseEntity<List<BillResponseDTO>> getBillsByMobileNumber(@PathVariable String mobileNumber) {
-        List<BillResponseDTO> bills = billService.getBillsByMobileNumber(mobileNumber);
+    public ResponseEntity<List<BillResponseDTO>> getBillsByMobileNumber(@PathVariable String mobileNumber,
+            HttpServletRequest request) {
+        if (mobileNumber == null || !mobileNumber.matches("^[0-9]{10}$")) {
+            return ResponseEntity.badRequest().build();
+        }
+        String location = RequestUtil.getLocationFromRequest(request);
+        List<BillResponseDTO> bills = billService.getBillsByMobileNumber(mobileNumber, location);
         return ResponseEntity.ok(bills);
     }
 

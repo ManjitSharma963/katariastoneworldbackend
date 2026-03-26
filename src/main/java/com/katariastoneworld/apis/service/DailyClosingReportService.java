@@ -7,6 +7,8 @@ import com.katariastoneworld.apis.entity.*;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
+import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
+import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -15,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -43,6 +46,12 @@ public class DailyClosingReportService {
     @Autowired
     private ExpenseRepository expenseRepository;
 
+    @Autowired
+    private CustomerAdvanceRepository customerAdvanceRepository;
+
+    @Autowired
+    private CustomerAdvanceUsageRepository customerAdvanceUsageRepository;
+
     /**
      * Single calendar day (same as {@link #buildReportForPeriod} with {@code from == to}).
      *
@@ -64,8 +73,8 @@ public class DailyClosingReportService {
         }
         final String loc = location == null ? "" : location.trim();
 
-        List<BillGST> gstBills = billGSTRepository.findByCustomerLocationAndBillDateBetween(loc, from, to);
-        List<BillNonGST> nonBills = billNonGSTRepository.findByCustomerLocationAndBillDateBetween(loc, from, to);
+        List<BillGST> gstBills = billGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
+        List<BillNonGST> nonBills = billNonGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
 
         if (backfillLegacy && from.equals(to)) {
             gstBills.forEach(this::backfillLegacyPaymentIfNeededGst);
@@ -119,7 +128,7 @@ public class DailyClosingReportService {
         List<BillPayment> collectedInPeriod = from.equals(to)
                 ? billPaymentRepository.findByPaymentDateAndBillLocation(loc, from)
                 : billPaymentRepository.findByPaymentDateBetweenAndBillLocation(loc, from, to);
-        BigDecimal totalCollected = collectedInPeriod.stream()
+        BigDecimal totalCollectedFromBills = collectedInPeriod.stream()
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -143,7 +152,7 @@ public class DailyClosingReportService {
             paymentSummary.merge(k, p.getAmount().doubleValue(), Double::sum);
         }
 
-        BigDecimal cashCollected = collectedInPeriod.stream()
+        BigDecimal cashCollectedFromBills = collectedInPeriod.stream()
                 .filter(p -> p.getPaymentMode() == BillPaymentMode.CASH)
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
@@ -157,6 +166,33 @@ public class DailyClosingReportService {
                 .setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal cashInHand = cashCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
+
+        LocalDateTime periodStart = from.atStartOfDay();
+        LocalDateTime periodEndExclusive = to.plusDays(1).atStartOfDay();
+        List<CustomerAdvance> advanceDepositsInPeriod = customerAdvanceRepository
+                .findDepositsForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive);
+        BigDecimal advanceDeposits = customerAdvanceRepository
+                .sumDepositsForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal advanceApplied = customerAdvanceUsageRepository
+                .sumUsageForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal advanceCash = ZERO;
+        for (CustomerAdvance adv : advanceDepositsInPeriod) {
+            if (adv.getAmount() == null) {
+                continue;
+            }
+            BigDecimal amount = adv.getAmount().setScale(2, RoundingMode.HALF_UP);
+            BillPaymentMode mode = adv.getPaymentMode() != null ? adv.getPaymentMode() : BillPaymentMode.CASH;
+            paymentSummary.merge(mode.name(), amount.doubleValue(), Double::sum);
+            if (mode == BillPaymentMode.CASH) {
+                advanceCash = advanceCash.add(amount);
+            }
+        }
+
+        BigDecimal totalCollected = totalCollectedFromBills.add(advanceDeposits).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal cashCollected = cashCollectedFromBills.add(advanceCash).setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal dueOnBills = pendingOnBilledDay.setScale(2, RoundingMode.HALF_UP);
 
@@ -192,6 +228,8 @@ public class DailyClosingReportService {
                 .collectionsReconciliationOk(reconOk)
                 .collectionsReconciliationDelta(reconDelta.doubleValue())
                 .totalExpenses(expenses.doubleValue())
+                .totalAdvanceDeposits(advanceDeposits.doubleValue())
+                .totalAdvanceAppliedOnBills(advanceApplied.doubleValue())
                 .pendingAmount(dueOnBills.doubleValue())
                 .cashInHand(cashInHand.doubleValue())
                 .bills(lines)

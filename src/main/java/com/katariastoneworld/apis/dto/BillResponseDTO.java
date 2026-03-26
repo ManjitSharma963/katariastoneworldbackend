@@ -46,6 +46,9 @@ public class BillResponseDTO {
     /** Sum of {@code bill_payments} for this bill (legacy PAID bills without rows may infer full total). */
     private Double totalPaid;
 
+    /** Portion of this bill covered by customer advance / token balance (not in bill_payments). */
+    private Double advanceUsed;
+
     /** Remaining bill balance (never negative). */
     private Double amountDue;
 

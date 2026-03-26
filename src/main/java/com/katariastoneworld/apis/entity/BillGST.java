@@ -34,6 +34,13 @@ public class BillGST {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "customer_id", nullable = false, foreignKey = @ForeignKey(name = "fk_bill_gst_customer", value = ConstraintMode.NO_CONSTRAINT))
     private Customer customer;
+
+    /**
+     * Branch location for this bill (isolates numbering + listing).
+     * Nullable for legacy rows; when null, fallback to {@code customer.location} in queries.
+     */
+    @Column(length = 50)
+    private String location;
     
     @NotNull(message = "Bill date is required")
     @Column(nullable = false)

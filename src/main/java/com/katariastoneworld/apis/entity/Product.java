@@ -102,6 +102,14 @@ public class Product {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "supplier_id")
+    private Supplier supplier;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dealer_id")
+    private Dealer dealer;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
     

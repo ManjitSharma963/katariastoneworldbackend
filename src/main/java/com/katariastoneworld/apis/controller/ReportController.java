@@ -38,6 +38,8 @@ public class ReportController {
                     When **date** and **dateTo** differ, bills with `bill_date` in the range are listed; **totalCollected** /
                     **paymentSummary** sum `bill_payments.payment_date` in that range; expenses use `expenses.date` in range;
                     **cashInHand** = cash collected in range − expenses in range.
+                    **totalAdvanceDeposits** / **totalAdvanceAppliedOnBills** sum customer token deposits and advance usage
+                    with `created_at` in the period (location via customer).
                     **paymentSummary** keys include CASH, UPI, BANK_TRANSFER, CHEQUE, and OTHER (e.g. null mode).
                     Response may include **warnings** (e.g. long date range) and **collectionsReconciliationOk** / **collectionsReconciliationDelta**
                     to verify mode totals vs **totalCollected** (not a substitute for accounting sign-off).

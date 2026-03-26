@@ -18,12 +18,21 @@ public class CustomerService {
     
     @Autowired
     private CustomerRepository customerRepository;
+
+    private static String normalizePhoneOrThrow(String phone) {
+        String digits = phone == null ? "" : phone.replaceAll("\\D", "");
+        if (!digits.matches("^[0-9]{10}$")) {
+            throw new RuntimeException("Phone number must be exactly 10 digits.");
+        }
+        return digits;
+    }
     
     public Customer getOrCreateCustomer(String phone) {
-        return customerRepository.findByPhone(phone)
+        final String normalizedPhone = normalizePhoneOrThrow(phone);
+        return customerRepository.findByPhone(normalizedPhone)
                 .orElseGet(() -> {
                     Customer customer = new Customer();
-                    customer.setPhone(phone);
+                    customer.setPhone(normalizedPhone);
                     return customerRepository.save(customer);
                 });
     }
@@ -43,19 +52,23 @@ public class CustomerService {
     /**
      * Get or create customer for bills. Works with existing DB that enforces UNIQUE(phone) (or similar)
      * without requiring schema changes: always reuse the row for that phone if it exists.
-     * Location is updated when provided so listing/filtering by location stays meaningful for recent activity.
+     *
+     * IMPORTANT for branch isolation:
+     * - Do NOT overwrite an existing customer's location when issuing a bill from another location.
+     *   Bills are location-scoped independently; customer location is treated as a profile attribute.
      */
     public Customer getOrCreateCustomer(String phone, String customerName, String address, String gstin, String email, String location, Long userId) {
-        Optional<Customer> existingByPhone = customerRepository.findByPhone(phone);
+        final String normalizedPhone = normalizePhoneOrThrow(phone);
+        Optional<Customer> existingByPhone = customerRepository.findByPhone(normalizedPhone);
         if (existingByPhone.isPresent()) {
             return updateCustomerDetails(existingByPhone.get(), customerName, address, gstin, email, location);
         }
         if (userId != null) {
-            return customerRepository.findByPhoneAndUserId(phone, userId)
+            return customerRepository.findByPhoneAndUserId(normalizedPhone, userId)
                     .map(c -> updateCustomerDetails(c, customerName, address, gstin, email, location))
-                    .orElseGet(() -> createNewCustomer(phone, customerName, address, gstin, email, location, userId));
+                    .orElseGet(() -> createNewCustomer(normalizedPhone, customerName, address, gstin, email, location, userId));
         }
-        return createNewCustomer(phone, customerName, address, gstin, email, location, null);
+        return createNewCustomer(normalizedPhone, customerName, address, gstin, email, location, null);
     }
 
     private Customer updateCustomerDetails(Customer customer, String customerName, String address, String gstin, String email, String location) {
@@ -64,7 +77,12 @@ public class CustomerService {
         if (address != null && !address.trim().isEmpty()) { customer.setAddress(address); updated = true; }
         if (gstin != null && !gstin.trim().isEmpty()) { customer.setGstin(gstin); updated = true; }
         if (email != null && !email.trim().isEmpty()) { customer.setEmail(email); updated = true; }
-        if (location != null && !location.trim().isEmpty()) { customer.setLocation(location); updated = true; }
+        // Only set location if customer has no location yet; never flip between branches.
+        if (location != null && !location.trim().isEmpty()
+                && (customer.getLocation() == null || customer.getLocation().trim().isEmpty())) {
+            customer.setLocation(location);
+            updated = true;
+        }
         return updated ? customerRepository.save(customer) : customer;
     }
 
@@ -81,8 +99,9 @@ public class CustomerService {
     }
     
     public Customer getCustomerByPhone(String phone) {
-        return customerRepository.findByPhone(phone)
-                .orElseThrow(() -> new RuntimeException("Customer not found with phone: " + phone));
+        final String normalizedPhone = normalizePhoneOrThrow(phone);
+        return customerRepository.findByPhone(normalizedPhone)
+                .orElseThrow(() -> new RuntimeException("Customer not found with phone: " + normalizedPhone));
     }
     
     public List<CustomerResponseDTO> getAllCustomers(String location) {
@@ -102,7 +121,7 @@ public class CustomerService {
     }
     
     public CustomerResponseDTO createCustomer(CustomerRequestDTO requestDTO, String location) {
-        String phone = requestDTO.getPhone();
+        String phone = normalizePhoneOrThrow(requestDTO.getPhone());
         if (phone != null && !phone.trim().isEmpty()) {
             Optional<Customer> existing = customerRepository.findByPhone(phone.trim());
             if (existing.isPresent()) {
@@ -112,6 +131,7 @@ public class CustomerService {
                 if (requestDTO.getAddress() != null) c.setAddress(requestDTO.getAddress());
                 if (requestDTO.getGstin() != null) c.setGstin(requestDTO.getGstin());
                 if (requestDTO.getEmail() != null) c.setEmail(requestDTO.getEmail());
+                if (requestDTO.getNotes() != null) c.setNotes(requestDTO.getNotes());
                 String loc = requestDTO.getLocation() != null ? requestDTO.getLocation() : location;
                 if (loc != null && !loc.trim().isEmpty()) c.setLocation(loc);
                 return convertToResponseDTO(customerRepository.save(c));
@@ -124,6 +144,7 @@ public class CustomerService {
         customer.setAddress(requestDTO.getAddress());
         customer.setGstin(requestDTO.getGstin());
         customer.setEmail(requestDTO.getEmail());
+        customer.setNotes(requestDTO.getNotes());
         customer.setLocation(requestDTO.getLocation() != null ? requestDTO.getLocation() : location);
         Customer savedCustomer = customerRepository.save(customer);
         return convertToResponseDTO(savedCustomer);
@@ -133,7 +154,7 @@ public class CustomerService {
         Customer customer = customerRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + id));
         if (requestDTO.getPhone() != null && !requestDTO.getPhone().trim().isEmpty()) {
-            customer.setPhone(requestDTO.getPhone());
+            customer.setPhone(normalizePhoneOrThrow(requestDTO.getPhone()));
         }
         if (requestDTO.getName() != null) {
             customer.setName(requestDTO.getName());
@@ -149,6 +170,9 @@ public class CustomerService {
         }
         if (requestDTO.getEmail() != null) {
             customer.setEmail(requestDTO.getEmail());
+        }
+        if (requestDTO.getNotes() != null) {
+            customer.setNotes(requestDTO.getNotes());
         }
         if (requestDTO.getLocation() != null) {
             customer.setLocation(requestDTO.getLocation());
@@ -173,6 +197,7 @@ public class CustomerService {
         dto.setGstin(customer.getGstin());
         dto.setEmail(customer.getEmail());
         dto.setLocation(customer.getLocation());
+        dto.setNotes(customer.getNotes());
         dto.setCreatedAt(customer.getCreatedAt());
         dto.setUpdatedAt(customer.getUpdatedAt());
         return dto;

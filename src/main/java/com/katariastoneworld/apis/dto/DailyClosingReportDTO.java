@@ -44,14 +44,14 @@ public class DailyClosingReportDTO {
     private Double totalDueOnBills;
 
     /**
-     * Sum of payment rows with {@code payment_date = date} for this location (money received that day,
-     * may include collections against older bills).
+     * Money received in the period for this location:
+     * bill payment rows ({@code bill_payments.payment_date}) + customer advance deposits.
      */
     private Double totalCollected;
 
     /**
-     * Amounts collected in the period by mode (payment_date in range). Keys typically include
-     * {@code CASH}, {@code UPI}, {@code BANK_TRANSFER}, {@code CHEQUE}, and {@code OTHER} (e.g. missing mode or unmapped).
+     * Amounts collected in the period by mode (bill payments + advance deposits). Keys typically include
+     * {@code CASH}, {@code UPI}, {@code BANK_TRANSFER}, {@code CHEQUE}, and {@code OTHER}.
      */
     @Builder.Default
     private Map<String, Double> paymentSummary = new LinkedHashMap<>();
@@ -68,6 +68,18 @@ public class DailyClosingReportDTO {
 
     /** Sum of expenses ({@code expenses.date}) for location on {@code date}. */
     private Double totalExpenses;
+
+    /**
+     * Sum of new customer advance/token deposits ({@code customer_advance.amount}) with {@code created_at}
+     * in the report period for this location.
+     */
+    private Double totalAdvanceDeposits;
+
+    /**
+     * Sum of advance applied to bills ({@code customer_advance_usage.amount_used}) with usage {@code created_at}
+     * in the report period for this location.
+     */
+    private Double totalAdvanceAppliedOnBills;
 
     /**
      * For bills <strong>billed</strong> on {@code date}: sum of {@code max(0, total_amount - paid)} where

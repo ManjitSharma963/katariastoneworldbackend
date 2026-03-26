@@ -33,6 +33,10 @@ public class ProductResponseDTO {
     private Double transportationCharge;
     private Double gstCharges;
     private String hsnNumber; // HSN code for GST
+    private Long supplierId;
+    private Long dealerId;
+    private String supplierName;
+    private String dealerName;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
