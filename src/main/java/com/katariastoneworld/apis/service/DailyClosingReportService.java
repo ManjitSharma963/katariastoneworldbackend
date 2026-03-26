@@ -165,8 +165,6 @@ public class DailyClosingReportService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal cashInHand = cashCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
-
         LocalDateTime periodStart = from.atStartOfDay();
         LocalDateTime periodEndExclusive = to.plusDays(1).atStartOfDay();
         List<CustomerAdvance> advanceDepositsInPeriod = customerAdvanceRepository
@@ -193,6 +191,7 @@ public class DailyClosingReportService {
 
         BigDecimal totalCollected = totalCollectedFromBills.add(advanceDeposits).setScale(2, RoundingMode.HALF_UP);
         BigDecimal cashCollected = cashCollectedFromBills.add(advanceCash).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal cashInHand = cashCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal dueOnBills = pendingOnBilledDay.setScale(2, RoundingMode.HALF_UP);
 
