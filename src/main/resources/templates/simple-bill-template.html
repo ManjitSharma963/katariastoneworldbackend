@@ -24,8 +24,22 @@
     position: absolute;
     top: 80px;
     right: 25px;
-    text-align: right;
+    text-align: left;
     font-size: 14px;
+    width: 360px;
+  }
+  .top-right-info p { margin: 4px 0; }
+  .payment-mode-row-label {
+    font-weight: bold;
+    text-align: right;
+    vertical-align: top;
+    width: 180px;
+  }
+  .payment-mode-row-value {
+    text-align: left;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.35;
   }
 
   .invoice-title {
@@ -105,7 +119,6 @@
   <div class="top-right-info">
     <p><span class="label">Invoice No:</span> {{billNumber}}</p>
     <p><span class="label">Date:</span> {{billDate}}</p>
-    <p><span class="label">Payment mode:</span> {{paymentMethod}}</p>
   </div>
 
   <!-- Title -->
@@ -161,6 +174,10 @@
     <tr class="totals-row grand-total">
       <td colspan="4" class="text-right">TOTAL</td>
       <td class="text-right">{{totalAmount}}</td>
+    </tr>
+    <tr class="totals-row">
+      <td colspan="4" class="payment-mode-row-label">Paid Via</td>
+      <td class="payment-mode-row-value">{{paymentMethod}}</td>
     </tr>
 
   </table>

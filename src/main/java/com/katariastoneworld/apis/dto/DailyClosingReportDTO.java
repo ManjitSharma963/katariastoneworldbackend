@@ -80,6 +80,12 @@ public class DailyClosingReportDTO {
      * in the report period for this location.
      */
     private Double totalAdvanceAppliedOnBills;
+    
+    /**
+     * Net advance for the report period: {@code totalAdvanceDeposits - totalAdvanceAppliedOnBills}.
+     * Positive means advance pool increased; negative means more advance was consumed than deposited in period.
+     */
+    private Double totalAdvanceAvailable;
 
     /**
      * For bills <strong>billed</strong> on {@code date}: sum of {@code max(0, total_amount - paid)} where
@@ -87,7 +93,11 @@ public class DailyClosingReportDTO {
      */
     private Double pendingAmount;
 
-    /** Cash collected on {@code date} minus expenses on {@code date} (simple day close). */
+    /** In-hand collections (cash + UPI) on period minus expenses (simple day close). */
+    private Double inHandAmount;
+
+    /** @deprecated Backward compatibility alias of {@link #inHandAmount}. */
+    @Deprecated
     private Double cashInHand;
 
     @Builder.Default

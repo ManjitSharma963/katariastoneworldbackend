@@ -3,6 +3,8 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.DailyClosingBillLineDTO;
 import com.katariastoneworld.apis.dto.DailyClosingExpenseLineDTO;
 import com.katariastoneworld.apis.dto.DailyClosingReportDTO;
+import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
+import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.entity.*;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
@@ -10,6 +12,9 @@ import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
+import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
+import com.katariastoneworld.apis.repository.DailyBudgetRepository;
+import com.katariastoneworld.apis.repository.ClientTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,6 +57,15 @@ public class DailyClosingReportService {
     @Autowired
     private CustomerAdvanceUsageRepository customerAdvanceUsageRepository;
 
+    @Autowired
+    private FinancialLedgerRepository financialLedgerRepository;
+
+    @Autowired
+    private DailyBudgetRepository dailyBudgetRepository;
+
+    @Autowired
+    private ClientTransactionRepository clientTransactionRepository;
+
     /**
      * Single calendar day (same as {@link #buildReportForPeriod} with {@code from == to}).
      *
@@ -83,6 +97,7 @@ public class DailyClosingReportService {
 
         Map<Long, List<BillPayment>> gstPaysByBill = loadPaymentsByBillId(BillKind.GST, gstBills.stream().map(BillGST::getId).toList());
         Map<Long, List<BillPayment>> nonPaysByBill = loadPaymentsByBillId(BillKind.NON_GST, nonBills.stream().map(BillNonGST::getId).toList());
+        Map<String, BigDecimal> advanceUsedByBill = loadAdvanceUsedByBill(gstBills, nonBills);
 
         List<DailyClosingBillLineDTO> lines = new ArrayList<>();
         BigDecimal totalSales = BigDecimal.ZERO;
@@ -90,16 +105,20 @@ public class DailyClosingReportService {
 
         for (BillGST b : gstBills) {
             List<BillPayment> pays = gstPaysByBill.getOrDefault(b.getId(), List.of());
-            lines.add(toLineGst(b, pays));
+            BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.GST, b.getId()), ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            lines.add(toLineGst(b, pays, advanceUsed));
             totalSales = totalSales.add(b.getTotalAmount());
-            pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, b.getPaymentMethod(),
+            pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
         }
         for (BillNonGST b : nonBills) {
             List<BillPayment> pays = nonPaysByBill.getOrDefault(b.getId(), List.of());
-            lines.add(toLineNon(b, pays));
+            BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.NON_GST, b.getId()), ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            lines.add(toLineNon(b, pays, advanceUsed));
             totalSales = totalSales.add(b.getTotalAmount());
-            pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, b.getPaymentMethod(),
+            pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
         }
 
@@ -152,8 +171,8 @@ public class DailyClosingReportService {
             paymentSummary.merge(k, p.getAmount().doubleValue(), Double::sum);
         }
 
-        BigDecimal cashCollectedFromBills = collectedInPeriod.stream()
-                .filter(p -> p.getPaymentMode() == BillPaymentMode.CASH)
+        BigDecimal inHandCollectedFromBills = collectedInPeriod.stream()
+                .filter(p -> p.getPaymentMode() == BillPaymentMode.CASH || p.getPaymentMode() == BillPaymentMode.UPI)
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -175,8 +194,9 @@ public class DailyClosingReportService {
         BigDecimal advanceApplied = customerAdvanceUsageRepository
                 .sumUsageForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal advanceAvailable = advanceDeposits.subtract(advanceApplied).setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal advanceCash = ZERO;
+        BigDecimal advanceInHand = ZERO;
         for (CustomerAdvance adv : advanceDepositsInPeriod) {
             if (adv.getAmount() == null) {
                 continue;
@@ -184,14 +204,37 @@ public class DailyClosingReportService {
             BigDecimal amount = adv.getAmount().setScale(2, RoundingMode.HALF_UP);
             BillPaymentMode mode = adv.getPaymentMode() != null ? adv.getPaymentMode() : BillPaymentMode.CASH;
             paymentSummary.merge(mode.name(), amount.doubleValue(), Double::sum);
-            if (mode == BillPaymentMode.CASH) {
-                advanceCash = advanceCash.add(amount);
+            if (mode == BillPaymentMode.CASH || mode == BillPaymentMode.UPI) {
+                advanceInHand = advanceInHand.add(amount);
             }
         }
 
         BigDecimal totalCollected = totalCollectedFromBills.add(advanceDeposits).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal cashCollected = cashCollectedFromBills.add(advanceCash).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal cashInHand = cashCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal inHandCollected = inHandCollectedFromBills.add(advanceInHand).setScale(2, RoundingMode.HALF_UP);
+
+        List<ClientTransaction> clientInflowRows = clientTransactionRepository
+                .findByLocationAndTransactionTypeAndTransactionDateBetweenOrderByTransactionDateDescIdDesc(
+                        loc, ClientTransactionType.PAYMENT_IN, from, to);
+        BigDecimal clientPaymentsIn = clientInflowRows.stream()
+                .map(ClientTransaction::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal clientInHand = clientInflowRows.stream()
+                .filter(tx -> tx.getPaymentMode() == BillPaymentMode.CASH || tx.getPaymentMode() == BillPaymentMode.UPI)
+                .map(ClientTransaction::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        for (ClientTransaction tx : clientInflowRows) {
+            BillPaymentMode mode = tx.getPaymentMode() != null ? tx.getPaymentMode() : BillPaymentMode.OTHER;
+            BigDecimal amount = tx.getAmount() != null ? tx.getAmount().setScale(2, RoundingMode.HALF_UP) : ZERO;
+            paymentSummary.merge(mode.name(), amount.doubleValue(), Double::sum);
+        }
+
+        totalCollected = totalCollected.add(clientPaymentsIn).setScale(2, RoundingMode.HALF_UP);
+        inHandCollected = inHandCollected.add(clientInHand).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal cashInHand = inHandCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal dueOnBills = pendingOnBilledDay.setScale(2, RoundingMode.HALF_UP);
 
@@ -229,7 +272,9 @@ public class DailyClosingReportService {
                 .totalExpenses(expenses.doubleValue())
                 .totalAdvanceDeposits(advanceDeposits.doubleValue())
                 .totalAdvanceAppliedOnBills(advanceApplied.doubleValue())
+                .totalAdvanceAvailable(advanceAvailable.doubleValue())
                 .pendingAmount(dueOnBills.doubleValue())
+                .inHandAmount(cashInHand.doubleValue())
                 .cashInHand(cashInHand.doubleValue())
                 .bills(lines)
                 .expenseLines(expenseLineDtos)
@@ -302,11 +347,42 @@ public class DailyClosingReportService {
         billPaymentRepository.save(row);
     }
 
-    private static DailyClosingBillLineDTO toLineGst(BillGST b, List<BillPayment> pays) {
+    private static String paymentKey(BillKind kind, Long billId) {
+        return kind.name() + ":" + billId;
+    }
+
+    private Map<String, BigDecimal> loadAdvanceUsedByBill(List<BillGST> gstBills, List<BillNonGST> nonBills) {
+        Map<String, BigDecimal> map = new HashMap<>();
+
+        List<Long> gstIds = gstBills.stream().map(BillGST::getId).filter(Objects::nonNull).toList();
+        if (!gstIds.isEmpty()) {
+            for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.GST, gstIds)) {
+                if (u.getBillId() == null || u.getAmountUsed() == null) continue;
+                map.merge(
+                        paymentKey(BillKind.GST, u.getBillId()),
+                        u.getAmountUsed().setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal::add);
+            }
+        }
+
+        List<Long> nonIds = nonBills.stream().map(BillNonGST::getId).filter(Objects::nonNull).toList();
+        if (!nonIds.isEmpty()) {
+            for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.NON_GST, nonIds)) {
+                if (u.getBillId() == null || u.getAmountUsed() == null) continue;
+                map.merge(
+                        paymentKey(BillKind.NON_GST, u.getBillId()),
+                        u.getAmountUsed().setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal::add);
+            }
+        }
+        return map;
+    }
+
+    private static DailyClosingBillLineDTO toLineGst(BillGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
         BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
         String statusName = b.getPaymentStatus().name();
         String pm = b.getPaymentMethod();
-        BigDecimal paid = computePaid(total, pays, pm, statusName);
+        BigDecimal paid = computePaid(total, pays, advanceUsed, pm, statusName);
         BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal overpaidAmt = paid.subtract(total).max(ZERO);
         if (overpaidAmt.compareTo(EPS) <= 0) {
@@ -331,11 +407,11 @@ public class DailyClosingReportService {
                 .build();
     }
 
-    private static DailyClosingBillLineDTO toLineNon(BillNonGST b, List<BillPayment> pays) {
+    private static DailyClosingBillLineDTO toLineNon(BillNonGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
         BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
         String statusName = b.getPaymentStatus().name();
         String pm = b.getPaymentMethod();
-        BigDecimal paid = computePaid(total, pays, pm, statusName);
+        BigDecimal paid = computePaid(total, pays, advanceUsed, pm, statusName);
         BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal overpaidAmt = paid.subtract(total).max(ZERO);
         if (overpaidAmt.compareTo(EPS) <= 0) {
@@ -420,16 +496,19 @@ public class DailyClosingReportService {
             case UPI -> new ModeBuckets(ZERO, a, ZERO, ZERO);
             case BANK_TRANSFER -> new ModeBuckets(ZERO, ZERO, a, ZERO);
             case CHEQUE -> new ModeBuckets(ZERO, ZERO, ZERO, a);
+            case OTHER -> new ModeBuckets(ZERO, ZERO, ZERO, a);
         };
     }
 
-    private static BigDecimal computePaid(BigDecimal billTotal, List<BillPayment> pays, String storedMethod,
+    private static BigDecimal computePaid(BigDecimal billTotal, List<BillPayment> pays, BigDecimal advanceUsed, String storedMethod,
             String paymentStatusName) {
         BigDecimal paid = pays.stream()
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal adv = advanceUsed == null ? ZERO : advanceUsed.setScale(2, RoundingMode.HALF_UP);
+        paid = paid.add(adv).setScale(2, RoundingMode.HALF_UP);
         boolean inferLegacyFull = pays.isEmpty()
                 && storedMethod != null
                 && !storedMethod.isBlank()
@@ -442,9 +521,9 @@ public class DailyClosingReportService {
         return paid;
     }
 
-    private static BigDecimal computeDue(BigDecimal billTotal, List<BillPayment> pays, String storedMethod,
+    private static BigDecimal computeDue(BigDecimal billTotal, List<BillPayment> pays, BigDecimal advanceUsed, String storedMethod,
             String paymentStatusName) {
-        BigDecimal paid = computePaid(billTotal, pays, storedMethod, paymentStatusName);
+        BigDecimal paid = computePaid(billTotal, pays, advanceUsed, storedMethod, paymentStatusName);
         return billTotal.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
     }
 
@@ -469,5 +548,119 @@ public class DailyClosingReportService {
             return legacyMethod.trim();
         }
         return "-";
+    }
+
+    public PaymentModeTotalsDTO paymentModeTotalsForSales(LocalDate from, LocalDate to, String location) {
+        final String loc = location == null ? "" : location.trim();
+        List<BillPayment> rows = from.equals(to)
+                ? billPaymentRepository.findByPaymentDateAndBillLocation(loc, from)
+                : billPaymentRepository.findByPaymentDateBetweenAndBillLocation(loc, from, to);
+
+        BigDecimal upi = ZERO, cash = ZERO, bank = ZERO, cheque = ZERO, other = ZERO;
+        for (BillPayment p : rows) {
+            if (p.getAmount() == null) continue;
+            BigDecimal a = p.getAmount().setScale(2, RoundingMode.HALF_UP);
+            if (p.getPaymentMode() == null) {
+                other = other.add(a);
+                continue;
+            }
+            switch (p.getPaymentMode()) {
+                case UPI -> upi = upi.add(a);
+                case CASH -> cash = cash.add(a);
+                case BANK_TRANSFER -> bank = bank.add(a);
+                case CHEQUE -> cheque = cheque.add(a);
+                default -> other = other.add(a);
+            }
+        }
+
+        // Backend-only legacy fallback for old bills without payment rows.
+        List<BillGST> gstBills = billGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
+        for (BillGST b : gstBills) {
+            if (rows.stream().anyMatch(p -> p.getBillKind() == BillKind.GST && Objects.equals(p.getBillId(), b.getId()))) continue;
+            if (b.getPaymentStatus() != BillGST.PaymentStatus.PAID) continue;
+            BigDecimal total = b.getPaidAmount() != null ? b.getPaidAmount() : b.getTotalAmount();
+            if (total == null || total.compareTo(ZERO) <= 0) continue;
+            BillPaymentMode mode = parseLegacyMode(b.getPaymentMethod());
+            if (mode == null) {
+                other = other.add(total);
+            } else if (mode == BillPaymentMode.UPI) {
+                upi = upi.add(total);
+            } else if (mode == BillPaymentMode.CASH) {
+                cash = cash.add(total);
+            } else if (mode == BillPaymentMode.BANK_TRANSFER) {
+                bank = bank.add(total);
+            } else if (mode == BillPaymentMode.CHEQUE) {
+                cheque = cheque.add(total);
+            }
+        }
+        List<BillNonGST> nonBills = billNonGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
+        for (BillNonGST b : nonBills) {
+            if (rows.stream().anyMatch(p -> p.getBillKind() == BillKind.NON_GST && Objects.equals(p.getBillId(), b.getId()))) continue;
+            if (b.getPaymentStatus() != BillNonGST.PaymentStatus.PAID) continue;
+            BigDecimal total = b.getPaidAmount() != null ? b.getPaidAmount() : b.getTotalAmount();
+            if (total == null || total.compareTo(ZERO) <= 0) continue;
+            BillPaymentMode mode = parseLegacyMode(b.getPaymentMethod());
+            if (mode == null) {
+                other = other.add(total);
+            } else if (mode == BillPaymentMode.UPI) {
+                upi = upi.add(total);
+            } else if (mode == BillPaymentMode.CASH) {
+                cash = cash.add(total);
+            } else if (mode == BillPaymentMode.BANK_TRANSFER) {
+                bank = bank.add(total);
+            } else if (mode == BillPaymentMode.CHEQUE) {
+                cheque = cheque.add(total);
+            }
+        }
+
+        return PaymentModeTotalsDTO.builder()
+                .upi(upi.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .cash(cash.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .bankTransfer(bank.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .cheque(cheque.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .other(other.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .build();
+    }
+
+    public ReconciliationReportDTO reconciliation(LocalDate date, String location) {
+        String loc = location == null ? "" : location.trim();
+        BigDecimal ledgerTotal = financialLedgerRepository
+                .sumInHandByLocationAndDateRange(loc, date, date)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
+                .orElse(null);
+        BigDecimal budgetNetMovement = ZERO.setScale(2, RoundingMode.HALF_UP);
+        if (budget != null && budget.getAmount() != null && budget.getRemainingBudget() != null) {
+            // Movement produced by collection adjustments beyond planned budget-spend baseline.
+            budgetNetMovement = budget.getRemainingBudget().subtract(budget.getAmount()).setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal delta = ledgerTotal.subtract(budgetNetMovement).setScale(2, RoundingMode.HALF_UP);
+        boolean ok = delta.abs().compareTo(new BigDecimal("0.02")) <= 0;
+        return new ReconciliationReportDTO(
+                loc,
+                String.valueOf(date),
+                ledgerTotal.doubleValue(),
+                budgetNetMovement.doubleValue(),
+                delta.doubleValue(),
+                ok ? "OK" : "WARNING",
+                ok ? "Ledger and budget are reconciled." : "Mismatch between ledger and budget movements.");
+    }
+
+    private static BillPaymentMode parseLegacyMode(String raw) {
+        if (raw == null || raw.isBlank() || "-".equals(raw.trim())) {
+            return null;
+        }
+        String t = raw.trim().toUpperCase(Locale.ROOT);
+        if (t.startsWith("C")) return BillPaymentMode.CASH;
+        if (t.startsWith("U")) return BillPaymentMode.UPI;
+        if (t.startsWith("B")) return BillPaymentMode.BANK_TRANSFER;
+        if (t.startsWith("Q")) return BillPaymentMode.CHEQUE;
+        try {
+            return BillPaymentMode.parseFlexible(raw);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 }

@@ -24,6 +24,9 @@ public class ExpenseResponseDTO {
     private String employeeName;
     private String month;
     private Boolean settled;
+    private String expenseCategory;
+    private String referenceType;
+    private String referenceId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

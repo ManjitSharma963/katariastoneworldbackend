@@ -14,6 +14,8 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
 
     List<BillPayment> findByBillKindAndBillIdOrderByIdAsc(BillKind billKind, Long billId);
 
+    java.util.Optional<BillPayment> findByIdAndBillKindAndBillId(Long id, BillKind billKind, Long billId);
+
     List<BillPayment> findByBillKindAndBillIdIn(BillKind billKind, Collection<Long> billIds);
 
     /**

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Where;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -16,6 +17,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "bills_gst")
+@Where(clause = "is_deleted = false")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -85,6 +87,10 @@ public class BillGST {
     @NotNull(message = "Total amount is required")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal totalAmount;
+
+    @NotNull(message = "Paid amount is required")
+    @Column(name = "paid_amount", nullable = false, precision = 10, scale = 2)
+    private BigDecimal paidAmount = BigDecimal.ZERO;
     
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -115,6 +121,12 @@ public class BillGST {
     /** User (staff) who created this bill. Enables "bills done by a specific user". */
     @Column(name = "created_by_user_id")
     private Long createdByUserId;
+
+    @Column(name = "updated_by_user_id")
+    private Long updatedByUserId;
+
+    @Column(name = "is_deleted", nullable = false)
+    private Boolean isDeleted = false;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

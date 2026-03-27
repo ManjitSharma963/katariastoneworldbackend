@@ -37,6 +37,8 @@ public class BillResponseDTO {
     private Double discountAmount;
     private Double totalAmount;
     private String paymentStatus;
+    /** @deprecated Legacy summary string; source-of-truth is {@code payments}/{@code bill_payments}. */
+    @Deprecated
     @Schema(description = "How the customer paid (e.g. cash, netbanking). \"-\" if not recorded.")
     private String paymentMethod;
     /** Same value as {@link #paymentMethod}; use in sale tables / UI that expect this name. */
@@ -45,6 +47,9 @@ public class BillResponseDTO {
 
     /** Sum of {@code bill_payments} for this bill (legacy PAID bills without rows may infer full total). */
     private Double totalPaid;
+
+    /** Persisted bill paid amount column (excluding advance usage). */
+    private Double paidAmount;
 
     /** Portion of this bill covered by customer advance / token balance (not in bill_payments). */
     private Double advanceUsed;

@@ -60,8 +60,8 @@ public interface BillGSTRepository extends JpaRepository<BillGST, Long> {
     Integer findMaxBillNumber();
 
     /**
-     * Max numeric suffix for prefixed bill numbers like {@code BHO-U3-12}.
-     * {@code prefix} should include trailing '-' (e.g. {@code BHO-U3-}).
+     * Max numeric suffix for prefixed bill numbers like {@code KSW-U3-12}.
+     * {@code prefix} should include trailing '-' (e.g. {@code KSW-U3-}).
      */
     @Query(value = """
             SELECT MAX(CAST(SUBSTRING(b.bill_number, CHAR_LENGTH(:prefix) + 1) AS UNSIGNED))

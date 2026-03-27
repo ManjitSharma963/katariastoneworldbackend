@@ -3,6 +3,7 @@ package com.katariastoneworld.apis.controller;
 import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
+import com.katariastoneworld.apis.dto.BillPaymentRequestDTO;
 import com.katariastoneworld.apis.service.BillService;
 import com.katariastoneworld.apis.service.EmailService;
 import com.katariastoneworld.apis.service.PdfService;
@@ -248,6 +249,46 @@ public class BillController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
+    }
+
+    @PostMapping("/{billType}/{id}/payments")
+    @RequiresRole({ "user", "admin" })
+    public ResponseEntity<BillResponseDTO> addPaymentToExistingBill(
+            @PathVariable String billType,
+            @PathVariable Long id,
+            @Valid @RequestBody BillPaymentRequestDTO paymentRequest,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        BillResponseDTO response = billService.addPaymentToBill(id, billType, paymentRequest, location, userId);
+        return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{billType}/{id}/payments/{paymentId}")
+    @RequiresRole({ "user", "admin" })
+    public ResponseEntity<BillResponseDTO> updatePaymentOnExistingBill(
+            @PathVariable String billType,
+            @PathVariable Long id,
+            @PathVariable Long paymentId,
+            @Valid @RequestBody BillPaymentRequestDTO paymentRequest,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        BillResponseDTO response = billService.updatePaymentOnBill(id, billType, paymentId, paymentRequest, location, userId);
+        return ResponseEntity.ok(response);
+    }
+
+    @DeleteMapping("/{billType}/{id}/payments/{paymentId}")
+    @RequiresRole({ "user", "admin" })
+    public ResponseEntity<BillResponseDTO> deletePaymentOnExistingBill(
+            @PathVariable String billType,
+            @PathVariable Long id,
+            @PathVariable Long paymentId,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        BillResponseDTO response = billService.deletePaymentOnBill(id, billType, paymentId, location, userId);
+        return ResponseEntity.ok(response);
     }
 
     /**

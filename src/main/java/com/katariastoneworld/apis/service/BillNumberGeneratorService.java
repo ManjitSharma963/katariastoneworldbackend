@@ -20,12 +20,13 @@ public class BillNumberGeneratorService {
     private BillNonGSTRepository billNonGSTRepository;
     
     /**
-     * Generate next GST bill number. Location + createdByUserId scoped series (e.g. BHO-U3-1, TAP-U5-1).
+     * Generate next GST bill number. Firm-initial prefix series (e.g. KSW-1, KMR-1).
+     * Bhondsi → Kataria Stone World (KSW). Tapugada → Kataria Marbles (KMR).
      * Uses lock + existence check so concurrent creates and odd legacy {@code bill_number} values cannot produce duplicates.
      */
     public String generateGSTBillNumber(String location, Long createdByUserId) {
         synchronized (gstBillNumberLock) {
-            String prefix = locationPrefix(location) + "-U" + safeUserId(createdByUserId) + "-";
+            String prefix = locationPrefix(location) + "-";
             return nextFreePrefixedBillNumber(
                     prefix,
                     () -> billGSTRepository.findMaxBillNumberForPrefix(prefix),
@@ -33,10 +34,10 @@ public class BillNumberGeneratorService {
         }
     }
 
-    /** Generate next Non-GST bill number (location + createdByUserId scoped). */
+    /** Generate next Non-GST bill number (firm-initial prefix series, e.g. KSW-1, KMR-1). */
     public String generateNonGSTBillNumber(String location, Long createdByUserId) {
         synchronized (nonGstBillNumberLock) {
-            String prefix = locationPrefix(location) + "-U" + safeUserId(createdByUserId) + "-";
+            String prefix = locationPrefix(location) + "-";
             return nextFreePrefixedBillNumber(
                     prefix,
                     () -> billNonGSTRepository.findMaxBillNumberForPrefix(prefix),
@@ -84,21 +85,25 @@ public class BillNumberGeneratorService {
         return prefix + nextNumber;
     }
 
+    /**
+     * Bill series prefix from branch location (JWT). Maps to firm trading names:
+     * <ul>
+     *   <li>Bhondsi — Kataria Stone World → {@code KSW}</li>
+     *   <li>Tapugada — Kataria Marbles → {@code KMR}</li>
+     * </ul>
+     * Unknown locations fall back to first three alphanumerics of the location string, else {@code LOC}.
+     */
     private static String locationPrefix(String location) {
         if (location == null) return "LOC";
         String l = location.trim().toLowerCase();
         if (l.isEmpty()) return "LOC";
-        if (l.startsWith("bhondsi")) return "BHO";
-        if (l.startsWith("tapugada")) return "TAP";
+        if (l.startsWith("bhondsi")) return "KSW";
+        if (l.startsWith("tapugada")) return "KMR";
         String letters = l.replaceAll("[^a-z0-9]", "");
         if (letters.length() >= 3) return letters.substring(0, 3).toUpperCase();
         return letters.toUpperCase();
     }
 
-    private static long safeUserId(Long userId) {
-        return userId != null && userId > 0 ? userId : 0L;
-    }
-    
     /**
      * @deprecated Use generateGSTBillNumber() or generateNonGSTBillNumber() instead
      * This method is kept for backward compatibility but should not be used

@@ -155,16 +155,17 @@ public class DailyBudgetService {
     }
 
     /**
-     * When a bill is paid in cash, add that amount to today's budget and remaining (cash in hand)
-     * for the location. Creates a daily_budget row for the location if none exists (so the UI can show updates).
+     * When a bill is collected, add in-hand collections to today's budget and remaining
+     * for the location. "In-hand" currently includes CASH + UPI.
+     * Creates a daily_budget row for the location if none exists (so the UI can show updates).
      */
-    public void recordCashCollectionFromBill(String location, BigDecimal cashAmount) {
-        if (location == null || location.isBlank() || cashAmount == null
-                || cashAmount.compareTo(BigDecimal.ZERO) <= 0) {
+    public void recordInHandCollectionFromBill(String location, BigDecimal inHandAmount) {
+        if (location == null || location.isBlank() || inHandAmount == null
+                || inHandAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
         String loc = location.trim();
-        BigDecimal add = cashAmount.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal add = inHandAmount.setScale(2, RoundingMode.HALF_UP);
         DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
                 .or(() -> dailyBudgetRepository.findByLocation(loc))
                 .orElse(null);
@@ -181,5 +182,39 @@ public class DailyBudgetService {
             budget.setRemainingBudget(rem.add(add));
         }
         dailyBudgetRepository.save(budget);
+    }
+
+    /**
+     * Deterministic adjustment for payment edit/delete flows.
+     * Positive delta increases in-hand; negative delta reverses previously counted in-hand.
+     */
+    public void adjustBudgetForInHandDelta(String location, BigDecimal delta) {
+        if (location == null || location.isBlank() || delta == null || delta.compareTo(BigDecimal.ZERO) == 0) {
+            return;
+        }
+        String loc = location.trim();
+        BigDecimal add = delta.setScale(2, RoundingMode.HALF_UP);
+        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc))
+                .orElse(null);
+        if (budget == null) {
+            budget = new DailyBudget();
+            budget.setLocation(loc);
+            budget.setUserId(null);
+            budget.setAmount(add.max(BigDecimal.ZERO));
+            budget.setRemainingBudget(add.max(BigDecimal.ZERO));
+            dailyBudgetRepository.save(budget);
+            return;
+        }
+        BigDecimal amt = budget.getAmount() != null ? budget.getAmount() : BigDecimal.ZERO;
+        BigDecimal rem = budget.getRemainingBudget() != null ? budget.getRemainingBudget() : amt;
+        budget.setAmount(amt.add(add));
+        budget.setRemainingBudget(rem.add(add));
+        dailyBudgetRepository.save(budget);
+    }
+
+    /** Backward compatible alias (legacy call sites). */
+    public void recordCashCollectionFromBill(String location, BigDecimal cashAmount) {
+        recordInHandCollectionFromBill(location, cashAmount);
     }
 }

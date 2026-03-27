@@ -6,7 +6,8 @@ public enum BillPaymentMode {
     CASH,
     UPI,
     BANK_TRANSFER,
-    CHEQUE;
+    CHEQUE,
+    OTHER;
 
     /**
      * Parse API / legacy text; uses the first token so summaries like {@code "CASH ₹500 | Due: ..."} still map to {@link #CASH}.
@@ -26,6 +27,7 @@ public enum BillPaymentMode {
             case "BANK_TRANSFER", "BANK", "BANKTRANSFER", "NETBANKING", "NET_BANKING", "NEFT", "RTGS", "IMPS" ->
                     BANK_TRANSFER;
             case "CHEQUE", "CHECK", "DD" -> CHEQUE;
+            case "OTHER" -> OTHER;
             default -> throw new IllegalArgumentException("Unknown payment mode: " + raw);
         };
     }

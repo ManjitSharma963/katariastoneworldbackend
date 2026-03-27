@@ -41,7 +41,12 @@ public class ExpenseRequestDTO {
     
     // For advance expenses
     private Boolean settled;
-    
+
+    // Financial-domain metadata (optional for backward compatibility)
+    private String expenseCategory; // DAILY, SALARY, INVENTORY, MISC
+    private String referenceType;   // DIRECT, PAYROLL, CLIENT
+    private String referenceId;     // External record ID
+
     // Location will be set from JWT token, not from request
 }
 

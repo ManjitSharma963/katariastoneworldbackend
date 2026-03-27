@@ -2,6 +2,8 @@ package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.DailyClosingReportDTO;
+import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
+import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.service.DailyClosingReportService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -71,5 +73,28 @@ public class ReportController {
         boolean backfill = backfillLegacy && date.equals(end);
         DailyClosingReportDTO dto = dailyClosingReportService.buildReportForPeriod(date, end, location, backfill);
         return ResponseEntity.ok(dto);
+    }
+
+    @GetMapping("/payment-mode-summary")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<PaymentModeTotalsDTO> paymentModeSummary(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate end = dateTo != null ? dateTo : date;
+        if (end.isBefore(date)) {
+            end = date;
+        }
+        return ResponseEntity.ok(dailyClosingReportService.paymentModeTotalsForSales(date, end, location));
+    }
+
+    @GetMapping("/reconciliation")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<ReconciliationReportDTO> reconciliation(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(dailyClosingReportService.reconciliation(date, location));
     }
 }

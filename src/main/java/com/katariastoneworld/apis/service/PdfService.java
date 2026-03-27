@@ -140,9 +140,7 @@ public class PdfService {
         html = html.replace("{{billNumber}}", bill.getBillNumber() != null ? bill.getBillNumber() : "");
         html = html.replace("{{billDate}}",
                 bill.getBillDate() != null ? bill.getBillDate().format(DATE_FORMATTER) : "");
-        html = html.replace("{{paymentMethod}}",
-                bill.getPaymentMethod() != null && !bill.getPaymentMethod().trim().isEmpty()
-                        ? escapeHtml(bill.getPaymentMethod().trim()) : "-");
+        html = html.replace("{{paymentMethod}}", formatPaymentMethodForPdf(bill.getPaymentMethod()));
 
         // Buyer Order Info (default values - can be added to DTO later)
         html = html.replace("{{buyerOrderNo}}", "-");
@@ -437,9 +435,7 @@ public class PdfService {
         html = html.replace("{{billNumber}}", bill.getBillNumber() != null ? bill.getBillNumber() : "");
         html = html.replace("{{billDate}}",
                 bill.getBillDate() != null ? bill.getBillDate().format(DATE_FORMATTER) : "");
-        html = html.replace("{{paymentMethod}}",
-                bill.getPaymentMethod() != null && !bill.getPaymentMethod().trim().isEmpty()
-                        ? escapeHtml(bill.getPaymentMethod().trim()) : "-");
+        html = html.replace("{{paymentMethod}}", formatPaymentMethodForPdf(bill.getPaymentMethod()));
         html = html.replace("{{labourCharge}}",
                 bill.getLabourCharge() != null ? DECIMAL_FORMAT.format(bill.getLabourCharge()) : "0.00");
         html = html.replace("{{transportationCharge}}",
@@ -659,6 +655,22 @@ public class PdfService {
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
         return text;
+    }
+
+    private String formatPaymentMethodForPdf(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "-";
+        }
+        String s = raw.trim();
+        s = s.replace('_', ' ');
+        s = s.replaceAll("\\s+", " ");
+        s = s.replaceAll("\\bBANK\\s+TRANSFER\\b", "Bank Transfer");
+        s = s.replaceAll("\\bCHEQUE\\b", "Cheque");
+        s = s.replaceAll("\\bCASH\\b", "Cash");
+        s = s.replaceAll("\\bUPI\\b", "UPI");
+        s = s.replace("#", "₹");
+        s = s.replaceAll("\\s*,\\s*", "  •  ");
+        return escapeHtml(s);
     }
 
     private byte[] convertHtmlToPdf(String html) throws IOException {

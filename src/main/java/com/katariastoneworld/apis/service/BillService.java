@@ -10,6 +10,8 @@ import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +31,7 @@ import java.util.stream.Stream;
 @Service
 @Transactional
 public class BillService {
+    private static final Logger log = LoggerFactory.getLogger(BillService.class);
 
     private static final BigDecimal PAY_ROUND_EPS = new BigDecimal("0.01");
 
@@ -68,9 +71,13 @@ public class BillService {
     @Autowired
     private CustomerAdvanceService customerAdvanceService;
 
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
+
     public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId) {
         // Get or create customer with details
-        System.out.println("Creating bill: service" + billRequestDTO);
+        log.info("bill_create_start location={} createdBy={} items={}",
+                location, createdByUserId, billRequestDTO.getItems() != null ? billRequestDTO.getItems().size() : 0);
         Customer customer = customerService.getOrCreateCustomer(
                 billRequestDTO.getCustomerMobileNumber(),
                 billRequestDTO.getCustomerName(),
@@ -174,8 +181,7 @@ public class BillService {
         bill.setOtherExpenses(otherExpenses);
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
-        // Keep legacy DB compatibility (older ENUM may not include DUE/PARTIAL).
-        bill.setPaymentStatus(BillGST.PaymentStatus.PENDING);
+        bill.setPaymentStatus(BillGST.PaymentStatus.DUE);
         bill.setPaymentMethod("-");
         // bill-level hsnCode: set after items (from request or first product in inventory)
         bill.setVehicleNo(trimToNull(billRequestDTO.getVehicleNo()));
@@ -278,6 +284,7 @@ public class BillService {
         List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate());
         BigDecimal totalPaidCash = sumResolvedLines(payLines);
         BigDecimal covered = advanceApplied.add(totalPaidCash);
+        savedBill.setPaidAmount(totalPaidCash.setScale(2, RoundingMode.HALF_UP));
         savedBill.setPaymentStatus(toGstPaymentStatus(totalAmount, covered));
         savedBill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaidCash, advanceApplied));
         billGSTRepository.save(savedBill);
@@ -293,8 +300,7 @@ public class BillService {
             productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), gstBillNote);
         }
 
-        persistResolvedPayments(BillKind.GST, savedBill.getId(), payLines);
-        applyCashAmountToDailyBudget(resolveBillLocation(savedBill, customer), payLines);
+        persistResolvedPayments(BillKind.GST, savedBill.getId(), payLines, resolveBillLocation(savedBill, customer));
 
         // Convert to response DTO
         BillResponseDTO responseDTO = convertGSTToResponseDTO(savedBill,
@@ -308,8 +314,8 @@ public class BillService {
 
         // Send email to customer asynchronously (non-blocking)
         emailService.sendBillEmail(responseDTO, customer.getEmail());
-        System.out.println(
-                "Bill created successfully. Email will be sent in background for bill: " + savedBill.getBillNumber());
+        log.info("bill_create_success kind=GST billId={} billNo={} total={} paid={} advance={}",
+                savedBill.getId(), savedBill.getBillNumber(), totalAmount, totalPaidCash, advanceApplied);
 
         return responseDTO;
     }
@@ -341,8 +347,7 @@ public class BillService {
         bill.setOtherExpenses(otherExpenses);
         bill.setDiscountAmount(discountAmount);
         bill.setTotalAmount(totalAmount);
-        // Keep legacy DB compatibility (older ENUM may not include DUE/PARTIAL).
-        bill.setPaymentStatus(BillNonGST.PaymentStatus.PENDING);
+        bill.setPaymentStatus(BillNonGST.PaymentStatus.DUE);
         bill.setPaymentMethod("-");
         bill.setCreatedByUserId(createdByUserId);
         System.out.println("[Bill Non-GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
@@ -430,6 +435,7 @@ public class BillService {
         List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate());
         BigDecimal totalPaidCash = sumResolvedLines(payLines);
         BigDecimal covered = advanceApplied.add(totalPaidCash);
+        savedBill.setPaidAmount(totalPaidCash.setScale(2, RoundingMode.HALF_UP));
         savedBill.setPaymentStatus(toNonGstPaymentStatus(totalAmount, covered));
         savedBill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaidCash, advanceApplied));
         billNonGSTRepository.save(savedBill);
@@ -445,8 +451,7 @@ public class BillService {
             productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), nonGstBillNote);
         }
 
-        persistResolvedPayments(BillKind.NON_GST, savedBill.getId(), payLines);
-        applyCashAmountToDailyBudget(resolveBillLocation(savedBill, customer), payLines);
+        persistResolvedPayments(BillKind.NON_GST, savedBill.getId(), payLines, resolveBillLocation(savedBill, customer));
 
         // Convert to response DTO
         BillResponseDTO responseDTO = convertNonGSTToResponseDTO(savedBill,
@@ -460,10 +465,198 @@ public class BillService {
 
         // Send email to customer asynchronously (non-blocking)
         emailService.sendBillEmail(responseDTO, customer.getEmail());
-        System.out.println(
-                "Bill created successfully. Email will be sent in background for bill: " + savedBill.getBillNumber());
+        log.info("bill_create_success kind=NON_GST billId={} billNo={} total={} paid={} advance={}",
+                savedBill.getId(), savedBill.getBillNumber(), totalAmount, totalPaidCash, advanceApplied);
 
         return responseDTO;
+    }
+
+    public BillResponseDTO addPaymentToBill(Long billId, String billType, BillPaymentRequestDTO paymentRequest,
+            String location, Long actorUserId) {
+        if (paymentRequest == null || paymentRequest.getAmount() == null || paymentRequest.getAmount() <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than 0");
+        }
+        BillPaymentMode mode = parseBillPaymentMode(paymentRequest.getPaymentMode());
+        BigDecimal amount = BigDecimal.valueOf(paymentRequest.getAmount()).setScale(2, RoundingMode.HALF_UP);
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than 0");
+        }
+        if ("GST".equalsIgnoreCase(billType)) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            Customer customer = bill.getCustomer();
+            String billLocation = resolveBillLocation(bill, customer);
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId);
+            BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId)
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal remaining = bill.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            if (amount.subtract(remaining).compareTo(PAY_ROUND_EPS) > 0) {
+                throw new IllegalArgumentException("Payment amount cannot exceed remaining bill amount");
+            }
+            BillPayment row = new BillPayment();
+            row.setBillKind(BillKind.GST);
+            row.setBillId(billId);
+            row.setAmount(amount);
+            row.setPaymentMode(mode);
+            row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : LocalDate.now());
+            row.setCreatedBy(actorUserId);
+            row.setUpdatedBy(actorUserId);
+            BillPayment saved = billPaymentRepository.save(row);
+            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
+                    saved.getAmount(), saved.getPaymentDate(), true);
+            refreshBillFinancialsGST(bill, billLocation);
+            BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
+                    updatedAdv);
+        }
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        Customer customer = bill.getCustomer();
+        String billLocation = resolveBillLocation(bill, customer);
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId);
+        BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal remaining = bill.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
+                .setScale(2, RoundingMode.HALF_UP);
+        if (amount.subtract(remaining).compareTo(PAY_ROUND_EPS) > 0) {
+            throw new IllegalArgumentException("Payment amount cannot exceed remaining bill amount");
+        }
+        BillPayment row = new BillPayment();
+        row.setBillKind(BillKind.NON_GST);
+        row.setBillId(billId);
+        row.setAmount(amount);
+        row.setPaymentMode(mode);
+        row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : LocalDate.now());
+        row.setCreatedBy(actorUserId);
+        row.setUpdatedBy(actorUserId);
+        BillPayment saved = billPaymentRepository.save(row);
+        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
+                saved.getAmount(), saved.getPaymentDate(), true);
+        refreshBillFinancialsNonGST(bill, billLocation);
+        BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        return convertNonGSTToResponseDTO(bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
+    }
+
+    public BillResponseDTO updatePaymentOnBill(Long billId, String billType, Long paymentId, BillPaymentRequestDTO paymentRequest,
+            String location, Long actorUserId) {
+        if (paymentRequest == null || paymentRequest.getAmount() == null || paymentRequest.getAmount() <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than 0");
+        }
+        BillKind kind = "GST".equalsIgnoreCase(billType) ? BillKind.GST : BillKind.NON_GST;
+        BillPayment row = billPaymentRepository.findByIdAndBillKindAndBillId(paymentId, kind, billId)
+                .orElseThrow(() -> new RuntimeException("Payment not found with id: " + paymentId));
+        BigDecimal oldAmount = row.getAmount() != null ? row.getAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BillPaymentMode newMode = parseBillPaymentMode(paymentRequest.getPaymentMode());
+        BigDecimal newAmount = BigDecimal.valueOf(paymentRequest.getAmount()).setScale(2, RoundingMode.HALF_UP);
+
+        if (kind == BillKind.GST) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            String billLocation = resolveBillLocation(bill, bill.getCustomer());
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId);
+            BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal remainingExcludingThis = bill.getTotalAmount().subtract(adv).subtract(paid).add(oldAmount)
+                    .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            if (newAmount.subtract(remainingExcludingThis).compareTo(PAY_ROUND_EPS) > 0) {
+                throw new IllegalArgumentException("Payment amount cannot exceed remaining bill amount");
+            }
+            row.setAmount(newAmount);
+            row.setPaymentMode(newMode);
+            row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : row.getPaymentDate());
+            row.setUpdatedBy(actorUserId);
+            BillPayment saved = billPaymentRepository.save(row);
+            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
+                    saved.getAmount(), saved.getPaymentDate(), true);
+            refreshBillFinancialsGST(bill, billLocation);
+            BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
+                    updatedAdv);
+        }
+
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId);
+        BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal remainingExcludingThis = bill.getTotalAmount().subtract(adv).subtract(paid).add(oldAmount)
+                .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        if (newAmount.subtract(remainingExcludingThis).compareTo(PAY_ROUND_EPS) > 0) {
+            throw new IllegalArgumentException("Payment amount cannot exceed remaining bill amount");
+        }
+        row.setAmount(newAmount);
+        row.setPaymentMode(newMode);
+        row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : row.getPaymentDate());
+        row.setUpdatedBy(actorUserId);
+        BillPayment saved = billPaymentRepository.save(row);
+        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
+                saved.getAmount(), saved.getPaymentDate(), true);
+        refreshBillFinancialsNonGST(bill, billLocation);
+        BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        return convertNonGSTToResponseDTO(bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
+    }
+
+    public BillResponseDTO deletePaymentOnBill(Long billId, String billType, Long paymentId, String location, Long actorUserId) {
+        BillKind kind = "GST".equalsIgnoreCase(billType) ? BillKind.GST : BillKind.NON_GST;
+        BillPayment row = billPaymentRepository.findByIdAndBillKindAndBillId(paymentId, kind, billId)
+                .orElseThrow(() -> new RuntimeException("Payment not found with id: " + paymentId));
+
+        if (kind == BillKind.GST) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            String billLocation = resolveBillLocation(bill, bill.getCustomer());
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            row.setIsDeleted(true);
+            row.setUpdatedBy(actorUserId);
+            BillPayment saved = billPaymentRepository.save(row);
+            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
+                    saved.getAmount(), saved.getPaymentDate(), false);
+            refreshBillFinancialsGST(bill, billLocation);
+            BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
+                    updatedAdv);
+        }
+
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        row.setIsDeleted(true);
+        row.setUpdatedBy(actorUserId);
+        BillPayment saved = billPaymentRepository.save(row);
+        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
+                saved.getAmount(), saved.getPaymentDate(), false);
+        refreshBillFinancialsNonGST(bill, billLocation);
+        BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        return convertNonGSTToResponseDTO(bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
     }
 
     public BillResponseDTO getBillById(Long id, String billType, String location) {
@@ -825,6 +1018,7 @@ public class BillService {
 
         dto.setAdvanceUsed(adv.doubleValue());
         dto.setTotalPaid(paid.doubleValue());
+        dto.setPaidAmount(paid.doubleValue());
         BigDecimal due = total.subtract(adv).subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         dto.setAmountDue(due.doubleValue());
         dto.setPayments(paymentRows.stream().map(this::toPaymentResponseDTO).collect(Collectors.toList()));
@@ -866,6 +1060,48 @@ public class BillService {
             return customer.getLocation().trim();
         }
         return null;
+    }
+
+    private void refreshBillFinancialsGST(BillGST bill, String location) {
+        List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId());
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = rows.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal covered = adv.add(paid).setScale(2, RoundingMode.HALF_UP);
+        bill.setPaidAmount(paid);
+        bill.setPaymentStatus(toGstPaymentStatus(bill.getTotalAmount(), covered));
+        List<ResolvedLine> lines = rows.stream()
+                .map(r -> new ResolvedLine(
+                        r.getAmount() != null ? r.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO,
+                        r.getPaymentMode() != null ? r.getPaymentMode() : BillPaymentMode.OTHER,
+                        r.getPaymentDate()))
+                .toList();
+        bill.setPaymentMethod(buildPaymentMethodSummary(lines, bill.getTotalAmount(), paid, adv));
+        if (location != null && !location.isBlank() && (bill.getLocation() == null || bill.getLocation().isBlank())) {
+            bill.setLocation(location.trim());
+        }
+        billGSTRepository.save(bill);
+    }
+
+    private void refreshBillFinancialsNonGST(BillNonGST bill, String location) {
+        List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, bill.getId());
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = rows.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal covered = adv.add(paid).setScale(2, RoundingMode.HALF_UP);
+        bill.setPaidAmount(paid);
+        bill.setPaymentStatus(toNonGstPaymentStatus(bill.getTotalAmount(), covered));
+        List<ResolvedLine> lines = rows.stream()
+                .map(r -> new ResolvedLine(
+                        r.getAmount() != null ? r.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO,
+                        r.getPaymentMode() != null ? r.getPaymentMode() : BillPaymentMode.OTHER,
+                        r.getPaymentDate()))
+                .toList();
+        bill.setPaymentMethod(buildPaymentMethodSummary(lines, bill.getTotalAmount(), paid, adv));
+        if (location != null && !location.isBlank() && (bill.getLocation() == null || bill.getLocation().isBlank())) {
+            bill.setLocation(location.trim());
+        }
+        billNonGSTRepository.save(bill);
     }
 
     private BillPaymentResponseDTO toPaymentResponseDTO(BillPayment p) {
@@ -950,24 +1186,24 @@ public class BillService {
         totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
         paid = paid.setScale(2, RoundingMode.HALF_UP);
         if (paid.compareTo(BigDecimal.ZERO) <= 0) {
-            return BillGST.PaymentStatus.PENDING;
+            return BillGST.PaymentStatus.DUE;
         }
         if (paid.compareTo(totalAmount) >= 0 || paid.subtract(totalAmount).abs().compareTo(PAY_ROUND_EPS) <= 0) {
             return BillGST.PaymentStatus.PAID;
         }
-        return BillGST.PaymentStatus.PENDING;
+        return BillGST.PaymentStatus.PARTIAL;
     }
 
     private static BillNonGST.PaymentStatus toNonGstPaymentStatus(BigDecimal totalAmount, BigDecimal paid) {
         totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
         paid = paid.setScale(2, RoundingMode.HALF_UP);
         if (paid.compareTo(BigDecimal.ZERO) <= 0) {
-            return BillNonGST.PaymentStatus.PENDING;
+            return BillNonGST.PaymentStatus.DUE;
         }
         if (paid.compareTo(totalAmount) >= 0 || paid.subtract(totalAmount).abs().compareTo(PAY_ROUND_EPS) <= 0) {
             return BillNonGST.PaymentStatus.PAID;
         }
-        return BillNonGST.PaymentStatus.PENDING;
+        return BillNonGST.PaymentStatus.PARTIAL;
     }
 
     /**
@@ -1018,6 +1254,7 @@ public class BillService {
             case UPI -> 'U';
             case BANK_TRANSFER -> 'B';
             case CHEQUE -> 'Q';
+            case OTHER -> 'O';
         };
     }
 
@@ -1043,7 +1280,7 @@ public class BillService {
         return s.substring(0, BILL_PAYMENT_METHOD_MAX_LEN - 1) + "\u2026";
     }
 
-    private void persistResolvedPayments(BillKind kind, Long billId, List<ResolvedLine> lines) {
+    private void persistResolvedPayments(BillKind kind, Long billId, List<ResolvedLine> lines, String location) {
         if (lines.isEmpty()) {
             return;
         }
@@ -1057,20 +1294,12 @@ public class BillService {
             row.setPaymentDate(line.paymentDate());
             rows.add(row);
         }
-        billPaymentRepository.saveAll(rows);
-    }
-
-    private void applyCashAmountToDailyBudget(String location, List<ResolvedLine> lines) {
-        if (location == null || location.isBlank()) {
-            return;
-        }
-        BigDecimal cash = lines.stream()
-                .filter(l -> l.mode() == BillPaymentMode.CASH)
-                .map(ResolvedLine::amount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-        if (cash.compareTo(BigDecimal.ZERO) > 0) {
-            dailyBudgetService.recordCashCollectionFromBill(location.trim(), cash);
+        List<BillPayment> savedRows = billPaymentRepository.saveAll(rows);
+        if (location != null && !location.isBlank()) {
+            for (BillPayment p : savedRows) {
+                financialLedgerService.syncBillPayment(location.trim(), kind, billId, p.getId(), p.getPaymentMode(),
+                        p.getAmount(), p.getPaymentDate(), true);
+            }
         }
     }
 

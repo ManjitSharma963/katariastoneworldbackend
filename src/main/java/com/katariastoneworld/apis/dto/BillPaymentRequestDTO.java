@@ -16,7 +16,7 @@ public class BillPaymentRequestDTO {
 
     private Double amount;
 
-    /** e.g. CASH, UPI, BANK_TRANSFER, CHEQUE */
+    /** Strict enum: CASH, UPI, BANK_TRANSFER, CHEQUE, OTHER */
     private String paymentMode;
 
     private LocalDate paymentDate;

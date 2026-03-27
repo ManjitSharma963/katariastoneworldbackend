@@ -4,6 +4,7 @@ import com.katariastoneworld.apis.dto.ClientPurchasePaymentRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentResponseDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseResponseDTO;
+import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
 import com.katariastoneworld.apis.entity.ClientPurchase;
 import com.katariastoneworld.apis.entity.ClientPurchasePayment;
 import com.katariastoneworld.apis.repository.ClientPurchasePaymentRepository;
@@ -24,6 +25,9 @@ public class ClientPurchaseService {
     
     @Autowired
     private ClientPurchasePaymentRepository clientPurchasePaymentRepository;
+
+    @Autowired
+    private ClientTransactionService clientTransactionService;
     
     public ClientPurchaseResponseDTO createClientPurchase(ClientPurchaseRequestDTO requestDTO, String location) {
         ClientPurchase clientPurchase = new ClientPurchase();
@@ -82,6 +86,17 @@ public class ClientPurchaseService {
         payment.setNotes(requestDTO.getNotes());
         
         ClientPurchasePayment saved = clientPurchasePaymentRepository.save(payment);
+
+        // Backward-compatible bridge: treat this as a client outflow transaction in the new domain.
+        ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
+        tx.setClientId(requestDTO.getClientId());
+        tx.setTransactionType("PAYMENT_OUT");
+        tx.setAmount(requestDTO.getAmount());
+        tx.setPaymentMode(requestDTO.getPaymentMethod());
+        tx.setTransactionDate(requestDTO.getDate());
+        tx.setNotes(requestDTO.getNotes());
+        clientTransactionService.create(tx, location, null);
+
         return convertToPaymentResponseDTO(saved);
     }
     

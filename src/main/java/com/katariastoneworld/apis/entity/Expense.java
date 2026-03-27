@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Where;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -13,6 +14,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "expenses")
+@Where(clause = "is_deleted = false")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -66,6 +68,26 @@ public class Expense {
     /** User who owns this expense. Data scoped per user. */
     @Column(name = "user_id")
     private Long userId;
+
+    @Column(name = "created_by")
+    private Long createdBy;
+
+    @Column(name = "updated_by")
+    private Long updatedBy;
+
+    @Column(name = "is_deleted", nullable = false)
+    private Boolean isDeleted = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "expense_category", length = 32)
+    private ExpenseCategory expenseCategory;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reference_type", length = 32)
+    private ReferenceType referenceType;
+
+    @Column(name = "reference_id", length = 64)
+    private String referenceId;
 
     @Column(name = "created_at", nullable = true, updatable = false, columnDefinition = "DATETIME DEFAULT CURRENT_TIMESTAMP")
     private LocalDateTime createdAt;

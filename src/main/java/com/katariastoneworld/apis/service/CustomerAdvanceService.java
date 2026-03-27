@@ -41,6 +41,9 @@ public class CustomerAdvanceService {
     @Autowired
     private CustomerRepository customerRepository;
 
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
+
     public CustomerAdvanceResponseDTO createAdvance(CustomerAdvanceCreateRequestDTO dto, String location) {
         Customer customer = customerRepository.findByIdAndLocation(dto.getCustomerId(), location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + dto.getCustomerId()));
@@ -55,6 +58,9 @@ public class CustomerAdvanceService {
         row.setPaymentMode(parseAdvancePaymentMode(dto.getPaymentMode()));
         row.setDescription(dto.getDescription() != null ? dto.getDescription().trim() : null);
         CustomerAdvance saved = customerAdvanceRepository.save(row);
+        financialLedgerService.recordAdvanceDeposit(location, customer.getId(), saved.getId(),
+                saved.getPaymentMode() != null ? saved.getPaymentMode() : BillPaymentMode.CASH,
+                saved.getAmount(), saved.getCreatedAt() != null ? saved.getCreatedAt().toLocalDate() : null);
         return toResponseDTO(saved);
     }
 
