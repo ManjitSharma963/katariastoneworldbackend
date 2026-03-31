@@ -1,0 +1,118 @@
+@startuml architecture-controllers-services
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+title Kataria Stone World — controller → service wiring
+
+package "controllers" {
+  class AuditController
+  class AuthController
+  class BillController
+  class CategoryController
+  class ClientPurchaseController
+  class ClientTransactionController
+  class CustomerAdvanceController
+  class CustomerController
+  class DailyBudgetController
+  class DealerController
+  class EmployeeController
+  class ExpenseController
+  class HeroController
+  class MobileController
+  class PayrollController
+  class ProductController
+  class ReportController
+  class SupplierController
+  class WebsiteProductController
+}
+
+package "events" {
+  class BillPaymentLedgerEventListener
+}
+
+package "services" {
+  class AuditLedgerService
+  class AuthService
+  class BillService
+  class CategoryService
+  class ClientPurchaseService
+  class ClientTransactionService
+  class CustomerAdvanceService
+  class CustomerService
+  class DailyBudgetService
+  class DailyClosingReportService
+  class DealerService
+  class EmailService
+  class EmployeeService
+  class ExpenseService
+  class FinancialLedgerService
+  class HeroService
+  class JwtUtil
+  class MobileDashboardService
+  class PayrollLedgerService
+  class PdfService
+  class ProductService
+  class SupplierService
+  class WebsiteProductService
+}
+
+AuditController --> AuditLedgerService
+
+AuthController --> AuthService
+AuthController --> JwtUtil
+
+BillController --> BillService
+BillController --> EmailService
+BillController --> PdfService
+
+CategoryController --> CategoryService
+
+ClientPurchaseController --> ClientPurchaseService
+
+ClientTransactionController --> ClientTransactionService
+
+CustomerAdvanceController --> CustomerAdvanceService
+
+CustomerController --> CustomerService
+
+DailyBudgetController --> DailyBudgetService
+
+DealerController --> DealerService
+
+EmployeeController --> EmployeeService
+
+ExpenseController --> ExpenseService
+
+HeroController --> HeroService
+
+MobileController --> MobileDashboardService
+
+PayrollController --> PayrollLedgerService
+
+ProductController --> ProductService
+
+ReportController --> DailyClosingReportService
+ReportController --> FinancialLedgerService
+
+BillPaymentLedgerEventListener --> FinancialLedgerService
+
+SupplierController --> SupplierService
+
+WebsiteProductController --> WebsiteProductService
+
+note as N1
+  **Typical cross-service deps (see Java sources):**
+  * **BillService** → **FinancialLedgerService**, **BillPaymentRepository**,
+    **CustomerAdvanceService**, **ProductService**, …
+  * **ExpenseService** → **FinancialLedgerService**
+  * **CustomerAdvanceService** → **FinancialLedgerService**
+  * **ClientTransactionService** → **FinancialLedgerService**
+  * **PayrollLedgerService** → **FinancialLedgerService**
+  * **BillService** / **DailyClosingReportService** → **ApplicationEventPublisher**
+    → **BillPaymentLedgerEventListener** → **FinancialLedgerService** (bill payments)
+  * **DailyClosingReportService** → **FinancialLedgerRepository**, **BillPaymentRepository**, …
+  * **DailyBudgetService** → **FinancialLedgerRepository** (net for day)
+  * **MobileDashboardService** → **FinancialLedgerRepository** (single-day mobile dashboard)
+  * **AuditLedgerService** → **FinancialLedgerRepository**, **UserRepository** (admin audit feed)
+end note
+
+@enduml

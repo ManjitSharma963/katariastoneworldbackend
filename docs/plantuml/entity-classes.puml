@@ -1,0 +1,70 @@
+@startuml entity-classes
+' JPA entity classes (apis.entity) — associations only; not every field
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+title Kataria Stone World — entity class map (JPA)
+
+class Customer <<Entity>>
+class BillGST <<Entity>>
+class BillNonGST <<Entity>>
+class BillItemGST <<Entity>>
+class BillItemNonGST <<Entity>>
+class Product <<Entity>>
+class Supplier <<Entity>>
+class Dealer <<Entity>>
+class BillPayment <<Entity>>
+class CustomerAdvance <<Entity>>
+class CustomerAdvanceUsage <<Entity>>
+class ClientPurchase <<Entity>>
+class ClientPurchasePayment <<Entity>>
+class Category <<Entity>>
+class User <<Entity>>
+class Employee <<Entity>>
+class Expense <<Entity>>
+class FinancialLedgerEntry <<Entity>>
+class ClientTransaction <<Entity>>
+class EmployeePayrollLedgerEntry <<Entity>>
+class ProductChangeHistory <<Entity>>
+class InventoryHistory <<Entity>>
+class WebsiteProduct <<Entity>>
+class Hero <<Entity>>
+class DailyBudget <<Entity>>
+class StateGstMaster <<Entity>>
+class Seller <<Entity>>
+
+Customer "1" o-- "*" BillGST : customer
+Customer "1" o-- "*" BillNonGST : customer
+
+BillGST "1" *-- "*" BillItemGST : items\n(mappedBy bill)
+BillNonGST "1" *-- "*" BillItemNonGST : items\n(mappedBy bill)
+
+BillItemGST --> Product : product\n(optional)
+BillItemNonGST --> Product : product\n(optional)
+
+Product --> Supplier : supplier\n(optional)
+Product --> Dealer : dealer\n(optional)
+
+Customer "1" o-- "*" CustomerAdvance : advances
+CustomerAdvance "1" o-- "*" CustomerAdvanceUsage : usages
+
+ClientPurchase "1" o-- "*" ClientPurchasePayment : payments\n(via JoinColumn)
+
+note bottom of BillPayment
+  **BillPayment** has no @ManyToOne to BillGST/BillNonGST;
+  uses bill_kind + bill_id.
+end note
+
+note bottom of FinancialLedgerEntry
+  **FinancialLedgerEntry**: logical keys **source_type** + **source_id**;
+  **entry_type** CREDIT/DEBIT; **is_deleted** for voids.
+  **created_by** / **updated_by** (audit); **updated_at** on mutation and soft-delete.
+  **ClientTransaction**, **EmployeePayrollLedgerEntry**:
+  own tables + optional ledger mirror via services.
+end note
+
+note bottom of DailyBudget
+  **DailyBudget** stores optional **amount** (cap).
+  Day **net** is computed from **FinancialLedgerRepository**, not a stored remainder.
+end note
+
+@enduml

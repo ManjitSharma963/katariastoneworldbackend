@@ -6,12 +6,14 @@ import com.katariastoneworld.apis.dto.BillPaymentResponseDTO;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
 import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.event.BillPaymentLedgerSyncEvent;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,10 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+/**
+ * Bill lifecycle and payments. Class-level {@link Transactional} ensures payment persistence and
+ * {@link BillPaymentLedgerSyncEvent} handling (synchronous) commit or roll back together.
+ */
 @Service
 @Transactional
 public class BillService {
@@ -63,16 +69,13 @@ public class BillService {
     private EmailService emailService;
 
     @Autowired
-    private DailyBudgetService dailyBudgetService;
-
-    @Autowired
     private BillPaymentRepository billPaymentRepository;
 
     @Autowired
     private CustomerAdvanceService customerAdvanceService;
 
     @Autowired
-    private FinancialLedgerService financialLedgerService;
+    private ApplicationEventPublisher eventPublisher;
 
     public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId) {
         // Get or create customer with details
@@ -508,8 +511,7 @@ public class BillService {
             row.setCreatedBy(actorUserId);
             row.setUpdatedBy(actorUserId);
             BillPayment saved = billPaymentRepository.save(row);
-            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
-                    saved.getAmount(), saved.getPaymentDate(), true);
+            publishBillPaymentLedgerSync(billLocation, BillKind.GST, billId, saved, true);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
@@ -541,8 +543,7 @@ public class BillService {
         row.setCreatedBy(actorUserId);
         row.setUpdatedBy(actorUserId);
         BillPayment saved = billPaymentRepository.save(row);
-        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
-                saved.getAmount(), saved.getPaymentDate(), true);
+        publishBillPaymentLedgerSync(billLocation, BillKind.NON_GST, billId, saved, true);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
         return convertNonGSTToResponseDTO(bill,
@@ -583,8 +584,7 @@ public class BillService {
             row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : row.getPaymentDate());
             row.setUpdatedBy(actorUserId);
             BillPayment saved = billPaymentRepository.save(row);
-            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
-                    saved.getAmount(), saved.getPaymentDate(), true);
+            publishBillPaymentLedgerSync(billLocation, BillKind.GST, billId, saved, true);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
@@ -611,8 +611,7 @@ public class BillService {
         row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : row.getPaymentDate());
         row.setUpdatedBy(actorUserId);
         BillPayment saved = billPaymentRepository.save(row);
-        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
-                saved.getAmount(), saved.getPaymentDate(), true);
+        publishBillPaymentLedgerSync(billLocation, BillKind.NON_GST, billId, saved, true);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
         return convertNonGSTToResponseDTO(bill,
@@ -634,8 +633,7 @@ public class BillService {
             row.setIsDeleted(true);
             row.setUpdatedBy(actorUserId);
             BillPayment saved = billPaymentRepository.save(row);
-            financialLedgerService.syncBillPayment(billLocation, BillKind.GST, billId, saved.getId(), saved.getPaymentMode(),
-                    saved.getAmount(), saved.getPaymentDate(), false);
+            publishBillPaymentLedgerSync(billLocation, BillKind.GST, billId, saved, false);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
@@ -651,8 +649,7 @@ public class BillService {
         row.setIsDeleted(true);
         row.setUpdatedBy(actorUserId);
         BillPayment saved = billPaymentRepository.save(row);
-        financialLedgerService.syncBillPayment(billLocation, BillKind.NON_GST, billId, saved.getId(), saved.getPaymentMode(),
-                saved.getAmount(), saved.getPaymentDate(), false);
+        publishBillPaymentLedgerSync(billLocation, BillKind.NON_GST, billId, saved, false);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
         return convertNonGSTToResponseDTO(bill,
@@ -1297,10 +1294,25 @@ public class BillService {
         List<BillPayment> savedRows = billPaymentRepository.saveAll(rows);
         if (location != null && !location.isBlank()) {
             for (BillPayment p : savedRows) {
-                financialLedgerService.syncBillPayment(location.trim(), kind, billId, p.getId(), p.getPaymentMode(),
-                        p.getAmount(), p.getPaymentDate(), true);
+                publishBillPaymentLedgerSync(location.trim(), kind, billId, p, true);
             }
         }
+    }
+
+    private void publishBillPaymentLedgerSync(String billLocation, BillKind kind, Long billId, BillPayment saved,
+            boolean active) {
+        if (billLocation == null || billLocation.isBlank() || saved == null || saved.getId() == null) {
+            return;
+        }
+        eventPublisher.publishEvent(new BillPaymentLedgerSyncEvent(
+                billLocation.trim(),
+                kind,
+                billId,
+                saved.getId(),
+                saved.getPaymentMode(),
+                saved.getAmount(),
+                saved.getPaymentDate(),
+                active));
     }
 
     private static BillPaymentMode parseBillPaymentMode(String raw) {

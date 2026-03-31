@@ -35,10 +35,6 @@ public class DailyBudget {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
-    /** Remaining budget (amount minus daily expenses). Carried over when setting next day's budget. */
-    @Column(name = "remaining_budget", precision = 12, scale = 2)
-    private BigDecimal remainingBudget;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

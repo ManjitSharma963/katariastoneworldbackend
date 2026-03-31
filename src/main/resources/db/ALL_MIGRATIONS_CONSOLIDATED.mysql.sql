@@ -1,8 +1,8 @@
 -- =============================================================================
 -- KATARIA STONE WORLD — CONSOLIDATED MySQL DATABASE CHANGES
 -- =============================================================================
--- Purpose: Single script listing all migrations from src/main/resources/db/,
---          database_migration_*.sql, and scripts/ (see section headers).
+-- Purpose: **Single source of truth** — all schema changes for this app live in
+--          this file only. Do not maintain parallel *.mysql.sql shards in db/.
 --
 -- WHY THIS SHOULD NOT BREAK EXISTING BEHAVIOUR
 --   • Additive only: new tables, new columns (with defaults), indexes, widened
@@ -43,7 +43,27 @@ SET NAMES utf8mb4;
 -- Helpers to make this script re-runnable safely.
 DROP PROCEDURE IF EXISTS ensure_column;
 DROP PROCEDURE IF EXISTS ensure_index;
+DROP PROCEDURE IF EXISTS ensure_drop_index;
 DELIMITER $$
+CREATE PROCEDURE ensure_drop_index(
+    IN p_table_name VARCHAR(128),
+    IN p_index_name VARCHAR(128)
+)
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = p_table_name
+          AND INDEX_NAME = p_index_name
+    ) THEN
+        SET @sql = CONCAT('ALTER TABLE `', p_table_name, '` DROP INDEX `', p_index_name, '`');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END IF;
+END$$
+
 CREATE PROCEDURE ensure_column(
     IN p_table_name VARCHAR(128),
     IN p_column_name VARCHAR(128),
@@ -91,7 +111,7 @@ END$$
 DELIMITER ;
 
 -- =============================================================================
--- SECTION A — Legacy / base (database_migration_add_location.sql)
+-- SECTION A — Legacy / base (location columns; commented — enable if DB predates location)
 -- =============================================================================
 -- Adds location to employees, expenses, products, customers. Skip if columns exist.
 
@@ -131,7 +151,7 @@ DELIMITER ;
 --     ADD COLUMN price_per_sqft_after DECIMAL(10, 2) NULL COMMENT 'Price per sqft after all expenses';
 
 -- =============================================================================
--- SECTION C — Data backfill (database_migration_update_existing_data.sql)
+-- SECTION C — Data backfill (optional location defaults)
 -- =============================================================================
 -- Optional; often redundant if SECTION A UPDATEs were run.
 
@@ -141,7 +161,7 @@ DELIMITER ;
 -- UPDATE customers SET location = 'Bhondsi' WHERE location IS NULL OR location = '';
 
 -- =============================================================================
--- SECTION D — suppliers_dealers.mysql.sql
+-- SECTION D — Suppliers & dealers + products.supplier_id / dealer_id
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS suppliers (
@@ -175,7 +195,7 @@ CALL ensure_column('products', 'dealer_id', 'dealer_id BIGINT NULL');
 --     ADD CONSTRAINT fk_products_dealer FOREIGN KEY (dealer_id) REFERENCES dealers (id);
 
 -- =============================================================================
--- SECTION E — bills_location_isolation.mysql.sql
+-- SECTION E — Bills GST / non-GST location + indexes
 -- =============================================================================
 
 CALL ensure_column('bills_gst', 'location', 'location VARCHAR(50) NULL');
@@ -189,7 +209,7 @@ CALL ensure_index('bills_non_gst', 'idx_bills_non_gst_location', 'location', 0);
 -- UPDATE bills_non_gst b JOIN customers c ON c.id = b.customer_id SET b.location = c.location WHERE b.location IS NULL;
 
 -- =============================================================================
--- SECTION F — customers_notes.mysql.sql
+-- SECTION F — Customers notes
 -- =============================================================================
 
 CALL ensure_column('customers', 'notes', 'notes TEXT NULL');
@@ -205,9 +225,10 @@ ALTER TABLE bills_gst
     MODIFY COLUMN payment_method VARCHAR(512) NULL;
 
 -- =============================================================================
--- SECTION H — bill_payments.mysql.sql (table + legacy backfill)
+-- SECTION H — Bill payments table + legacy backfill
 -- =============================================================================
 
+-- Must include is_deleted (and other audit cols) before INSERT backfill; Section N ensure_* is idempotent if already present.
 CREATE TABLE IF NOT EXISTS bill_payments (
     payment_id BIGINT NOT NULL AUTO_INCREMENT,
     bill_kind VARCHAR(16) NOT NULL,
@@ -216,9 +237,19 @@ CREATE TABLE IF NOT EXISTS bill_payments (
     payment_mode VARCHAR(32) NOT NULL,
     payment_date DATE NOT NULL,
     created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NULL,
+    created_by BIGINT NULL,
+    updated_by BIGINT NULL,
+    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
     PRIMARY KEY (payment_id),
     KEY idx_bill_payments_bill (bill_kind, bill_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Legacy: if bill_payments already existed without audit columns, IF NOT EXISTS skipped CREATE — add columns before INSERT.
+CALL ensure_column('bill_payments', 'updated_at', 'updated_at DATETIME(6) NULL');
+CALL ensure_column('bill_payments', 'created_by', 'created_by BIGINT NULL');
+CALL ensure_column('bill_payments', 'updated_by', 'updated_by BIGINT NULL');
+CALL ensure_column('bill_payments', 'is_deleted', 'is_deleted TINYINT(1) NOT NULL DEFAULT 0');
 
 INSERT INTO bill_payments (bill_kind, bill_id, amount, payment_mode, payment_date, created_at, is_deleted)
 SELECT
@@ -282,7 +313,7 @@ SET payment_status = 'PENDING'
 WHERE payment_status IS NULL OR payment_status = '' OR payment_status NOT IN ('DUE','PENDING','PARTIAL','PAID','CANCELLED');
 
 -- =============================================================================
--- SECTION J — bills_paid_amount.mysql.sql (requires bill_payments for backfill)
+-- SECTION J — Bills paid_amount (requires bill_payments for backfill)
 -- =============================================================================
 
 CALL ensure_column('bills_gst', 'paid_amount', 'paid_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER total_amount');
@@ -307,7 +338,7 @@ LEFT JOIN (
 SET b.paid_amount = COALESCE(p.paid, 0.00);
 
 -- =============================================================================
--- SECTION K — customer_advance.mysql.sql
+-- SECTION K — Customer advance + usage tables
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS customer_advance (
@@ -337,7 +368,7 @@ CALL ensure_index('customer_advance_usage', 'idx_advance_usage_bill', 'bill_kind
 CALL ensure_index('customer_advance_usage', 'idx_advance_usage_advance', 'advance_id', 0);
 
 -- =============================================================================
--- SECTION L — customer_advance_payment_mode.mysql.sql
+-- SECTION L — Customer advance payment_mode
 -- =============================================================================
 
 CALL ensure_column('customer_advance', 'payment_mode', 'payment_mode VARCHAR(32) NULL AFTER description');
@@ -347,14 +378,17 @@ SET payment_mode = 'CASH'
 WHERE payment_mode IS NULL OR TRIM(payment_mode) = '';
 
 -- =============================================================================
--- SECTION M — financial_ledger.mysql.sql
+-- SECTION M — Financial ledger
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS financial_ledger (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(32) NOT NULL,
+    entry_type VARCHAR(16) NOT NULL DEFAULT 'CREDIT',
     source_type VARCHAR(32) NOT NULL,
     source_id VARCHAR(64) NOT NULL,
+    reference_type VARCHAR(32) NULL,
+    reference_id VARCHAR(64) NULL,
     location VARCHAR(50) NOT NULL,
     bill_kind VARCHAR(16) NULL,
     bill_id BIGINT NULL,
@@ -363,15 +397,40 @@ CREATE TABLE IF NOT EXISTS financial_ledger (
     amount DECIMAL(14,2) NOT NULL,
     in_hand_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
     event_date DATE NOT NULL,
-    created_at DATETIME(6) NOT NULL,
-    CONSTRAINT uk_fin_ledger_source UNIQUE (source_type, source_id)
+    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL
 );
+
+-- Existing databases: add columns / drop legacy unique (soft-delete + DEBIT rows need no unique on source).
+CALL ensure_column('financial_ledger', 'entry_type', 'entry_type VARCHAR(16) NOT NULL DEFAULT \'CREDIT\' AFTER event_type');
+CALL ensure_column('financial_ledger', 'reference_type', 'reference_type VARCHAR(32) NULL AFTER source_id');
+CALL ensure_column('financial_ledger', 'reference_id', 'reference_id VARCHAR(64) NULL AFTER reference_type');
+CALL ensure_column('financial_ledger', 'is_deleted', 'is_deleted TINYINT(1) NOT NULL DEFAULT 0 AFTER event_date');
+
+UPDATE financial_ledger SET entry_type = 'CREDIT' WHERE entry_type IS NULL OR TRIM(entry_type) = '';
+UPDATE financial_ledger SET is_deleted = 0 WHERE is_deleted IS NULL;
+
+-- Strict uniqueness: at most one row per (source_type, source_id, is_deleted).
+-- Allows e.g. archived (is_deleted=1) and a new active (is_deleted=0) only if app inserts both — normally one row is updated in place.
+CALL ensure_drop_index('financial_ledger', 'uk_fin_ledger_source');
+CALL ensure_drop_index('financial_ledger', 'idx_fin_ledger_source_active');
+CALL ensure_index('financial_ledger', 'uk_fin_ledger_source_del', 'source_type, source_id, is_deleted', 1);
 
 CALL ensure_index('financial_ledger', 'idx_fin_ledger_loc_date', 'location, event_date', 0);
 CALL ensure_index('financial_ledger', 'idx_fin_ledger_mode_date', 'payment_mode, event_date', 0);
+CALL ensure_index('financial_ledger', 'idx_fin_ledger_event_date_location', 'event_date, location', 0);
+CALL ensure_index('financial_ledger', 'idx_fin_ledger_entry_type', 'location, event_date, entry_type', 0);
+CALL ensure_index('financial_ledger', 'idx_fin_ledger_entry_type_only', 'entry_type', 0);
+
+CALL ensure_column('financial_ledger', 'created_by', 'created_by BIGINT NULL AFTER created_at');
+CALL ensure_column('financial_ledger', 'updated_at', 'updated_at DATETIME(6) NULL');
+CALL ensure_column('financial_ledger', 'updated_by', 'updated_by BIGINT NULL AFTER updated_at');
+
+CALL ensure_index('financial_ledger', 'idx_event_date', 'event_date', 0);
+CALL ensure_index('financial_ledger', 'idx_source_type', 'source_type', 0);
 
 -- =============================================================================
--- SECTION N — audit_softdelete_indexes.mysql.sql
+-- SECTION N — Audit columns, soft-delete, reporting indexes
 -- =============================================================================
 -- bill_payments.updated_at is NULLABLE (avoids strict-mode issues on backfill).
 
@@ -410,7 +469,7 @@ CALL ensure_index('bills_non_gst', 'idx_bills_non_gst_created_at_location', 'cre
 CALL ensure_index('customers', 'idx_customers_phone_location', 'phone, location', 0);
 
 -- =============================================================================
--- SECTION O — product_change_history.mysql.sql
+-- SECTION O — Product change history
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS product_change_history (
@@ -428,7 +487,7 @@ CREATE TABLE IF NOT EXISTS product_change_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
--- SECTION P — inventory_history.mysql.sql
+-- SECTION P — Inventory history
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS inventory_history (
@@ -473,7 +532,7 @@ CREATE TABLE IF NOT EXISTS employee_payroll_ledger (
 );
 
 -- =============================================================================
--- SECTION Q — scripts/add-hsn-number-to-bill-items-gst.sql (idempotent)
+-- SECTION Q — bill_items_gst.hsn_number (idempotent)
 -- =============================================================================
 
 SET @db := DATABASE();
@@ -489,7 +548,7 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 -- =============================================================================
--- SECTION R — scripts/fix-customers-unique-constraint.sql (OPTIONAL)
+-- SECTION R — Customers phone+location unique (OPTIONAL; inspect indexes first)
 -- =============================================================================
 -- Only if you must drop a legacy UNIQUE(phone) and rely on (location, phone).
 -- Inspect SHOW INDEX FROM customers; before running.
@@ -498,7 +557,7 @@ DEALLOCATE PREPARE stmt;
 -- ALTER TABLE customers ADD UNIQUE KEY uk_customer_location_phone (location, phone);
 
 -- =============================================================================
--- SECTION S — financial_domains_refactor.mysql.sql
+-- SECTION S — Expense categories + client_transactions
 -- =============================================================================
 
 CALL ensure_column('expenses', 'expense_category', 'expense_category VARCHAR(32) NULL');

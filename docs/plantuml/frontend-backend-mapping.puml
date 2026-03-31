@@ -1,0 +1,37 @@
+@startuml frontend-backend-mapping
+skinparam shadowing false
+title Inventory SPA ↔ API mapping (main flows)
+
+package "React app (kataristoneworldinventory)" {
+  rectangle "Dashboard" {
+    [Statistics / sales charts] --> [/api/bills sales data]
+    [Ledger card] --> [**GET /api/reports/summary**\nCredit · Debit · Net · expenseDebitTotal]
+  }
+  rectangle "Sales / Bills" {
+    [List & detail] --> [/api/bills ...]
+    [PDF] --> [/api/bills/.../download]
+  }
+  rectangle "Expenses" {
+    [CRUD + budget UI] --> [/api/expenses]
+    [Budget history] --> [/api/daily-budget/all\nnetLedgerBalance from ledger]
+  }
+  rectangle "Reports" {
+    [Daily closing] --> [**GET /api/reports/daily-closing**]
+    [Export CSV] --> [same DTO]
+  }
+  rectangle "Inventory" {
+    [Products] --> [/api/inventory ...]
+    [History] --> [/api/inventory/history/{id}]
+  }
+}
+
+package "Spring Boot (katariastoneworldbackend)" {
+  [Controllers] ..> [Services]
+}
+
+note right
+  **JWT** carries **location** (and role); most list/report APIs
+  scope data to that location.
+end note
+
+@enduml

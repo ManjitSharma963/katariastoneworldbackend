@@ -27,7 +27,7 @@ public class ExpenseService {
     private ExpenseRepository expenseRepository;
 
     @Autowired
-    private DailyBudgetService dailyBudgetService;
+    private FinancialLedgerService financialLedgerService;
 
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
@@ -66,9 +66,7 @@ public class ExpenseService {
         Expense savedExpense = expenseRepository.save(expense);
         log.info("expense_create location={} id={} amount={} category={} date={}",
                 location, savedExpense.getId(), savedExpense.getAmount(), savedExpense.getCategory(), savedExpense.getDate());
-        if (LocalDate.now().equals(savedExpense.getDate()) && savedExpense.getAmount() != null) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, savedExpense.getAmount().negate());
-        }
+        financialLedgerService.upsertExpenseLedger(savedExpense);
         return convertToResponseDTO(savedExpense);
     }
     
@@ -118,18 +116,10 @@ public class ExpenseService {
             expense.setSettled(false);
         }
         
-        BigDecimal oldAmount = expense.getAmount();
-        LocalDate oldDate = expense.getDate();
         Expense updatedExpense = expenseRepository.save(expense);
         log.info("expense_update location={} id={} amount={} category={} date={}",
                 location, updatedExpense.getId(), updatedExpense.getAmount(), updatedExpense.getCategory(), updatedExpense.getDate());
-        LocalDate today = LocalDate.now();
-        if (today.equals(oldDate)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, oldAmount != null ? oldAmount : BigDecimal.ZERO);
-        }
-        if (today.equals(updatedExpense.getDate()) && updatedExpense.getAmount() != null) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, updatedExpense.getAmount().negate());
-        }
+        financialLedgerService.upsertExpenseLedger(updatedExpense);
         return convertToResponseDTO(updatedExpense);
     }
     
@@ -139,11 +129,9 @@ public class ExpenseService {
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
-        if (LocalDate.now().equals(expense.getDate()) && expense.getAmount() != null) {
-            dailyBudgetService.adjustRemainingForDailyExpense(expense.getLocation(), expense.getAmount());
-        }
         log.info("expense_delete location={} id={} amount={} date={}",
                 expense.getLocation(), expense.getId(), expense.getAmount(), expense.getDate());
+        financialLedgerService.softDeleteBySourceTypeAndSourceId("EXPENSE", String.valueOf(expense.getId()));
         expense.setIsDeleted(true);
         expenseRepository.save(expense);
     }

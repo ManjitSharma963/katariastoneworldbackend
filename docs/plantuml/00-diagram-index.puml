@@ -1,0 +1,39 @@
+@startmindmap
+skinparam backgroundColor #FEFEFE
+title PlantUML in docs/plantuml — what to open first
+
+* **Architecture (start here)**
+** architecture-overview.puml
+*** boxes: SPA → API → MySQL + ledger role
+** financial-ledger-map.puml
+*** who writes ledger + who reads it
+** architecture-controllers-services.puml
+*** Controller → Service wiring
+** frontend-backend-mapping.puml
+*** React pages ↔ main endpoints
+
+* **Data**
+** database-erd.puml
+*** tables + FK-style relationships
+** entity-classes.puml
+*** JPA entity associations
+
+* **APIs & behaviour**
+** rest-apis.puml
+*** HTTP routes by package
+** functionality-and-effects.puml
+*** features + DB / ledger effects (mindmap)
+
+left side
+
+** Render
+*** VS Code: PlantUML extension
+*** https://www.plantuml.com/plantuml
+*** CLI: plantuml *.puml
+
+** Conventions
+*** Money truth = **financial_ledger**
+*** Bills + bill_payments = operational + AR detail
+*** daily_budget.amount = optional **cap** (info); net from ledger
+
+@endmindmap

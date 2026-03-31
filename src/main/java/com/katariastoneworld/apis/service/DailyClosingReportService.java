@@ -6,16 +6,15 @@ import com.katariastoneworld.apis.dto.DailyClosingReportDTO;
 import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
 import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.event.BillPaymentLedgerSyncEvent;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
-import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
-import com.katariastoneworld.apis.repository.DailyBudgetRepository;
-import com.katariastoneworld.apis.repository.ClientTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +26,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Report aggregation. Legacy payment backfill publishes {@link BillPaymentLedgerSyncEvent} in the same transaction
+ * as {@code bill_payments} inserts (synchronous listener).
+ */
 @Service
 @Transactional
 public class DailyClosingReportService {
@@ -52,19 +55,13 @@ public class DailyClosingReportService {
     private ExpenseRepository expenseRepository;
 
     @Autowired
-    private CustomerAdvanceRepository customerAdvanceRepository;
-
-    @Autowired
     private CustomerAdvanceUsageRepository customerAdvanceUsageRepository;
 
     @Autowired
     private FinancialLedgerRepository financialLedgerRepository;
 
     @Autowired
-    private DailyBudgetRepository dailyBudgetRepository;
-
-    @Autowired
-    private ClientTransactionRepository clientTransactionRepository;
+    private ApplicationEventPublisher eventPublisher;
 
     /**
      * Single calendar day (same as {@link #buildReportForPeriod} with {@code from == to}).
@@ -91,8 +88,8 @@ public class DailyClosingReportService {
         List<BillNonGST> nonBills = billNonGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
 
         if (backfillLegacy && from.equals(to)) {
-            gstBills.forEach(this::backfillLegacyPaymentIfNeededGst);
-            nonBills.forEach(this::backfillLegacyPaymentIfNeededNon);
+            gstBills.forEach(b -> backfillLegacyPaymentIfNeededGst(b, loc));
+            nonBills.forEach(b -> backfillLegacyPaymentIfNeededNon(b, loc));
         }
 
         Map<Long, List<BillPayment>> gstPaysByBill = loadPaymentsByBillId(BillKind.GST, gstBills.stream().map(BillGST::getId).toList());
@@ -144,97 +141,46 @@ public class DailyClosingReportService {
                         .build())
                 .collect(Collectors.toList());
 
-        List<BillPayment> collectedInPeriod = from.equals(to)
-                ? billPaymentRepository.findByPaymentDateAndBillLocation(loc, from)
-                : billPaymentRepository.findByPaymentDateBetweenAndBillLocation(loc, from, to);
-        BigDecimal totalCollectedFromBills = collectedInPeriod.stream()
-                .map(BillPayment::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
+        BigDecimal totalCredits = financialLedgerRepository
+                .sumAmountByLocationDateRangeAndEntryType(loc, from, to, LedgerEntryType.CREDIT)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalDebits = financialLedgerRepository
+                .sumAmountByLocationDateRangeAndEntryType(loc, from, to, LedgerEntryType.DEBIT)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal expenseOnlyLedger = financialLedgerRepository
+                .sumDebitByLocationDateRangeAndSourceType(loc, from, to, "EXPENSE")
                 .setScale(2, RoundingMode.HALF_UP);
 
+        List<FinancialLedgerEntry> creditRows = financialLedgerRepository.findCreditsByLocationAndDateRange(loc, from, to);
         Map<String, Double> paymentSummary = new LinkedHashMap<>();
         paymentSummary.put("CASH", 0.0);
         paymentSummary.put("UPI", 0.0);
         paymentSummary.put("BANK_TRANSFER", 0.0);
         paymentSummary.put("CHEQUE", 0.0);
         paymentSummary.put("OTHER", 0.0);
-        for (BillPayment p : collectedInPeriod) {
-            if (p.getAmount() == null) {
+        for (FinancialLedgerEntry le : creditRows) {
+            if (le.getAmount() == null) {
                 continue;
             }
-            if (p.getPaymentMode() == null) {
-                paymentSummary.merge("OTHER", p.getAmount().doubleValue(), Double::sum);
-                continue;
-            }
-            String k = p.getPaymentMode().name();
-            paymentSummary.merge(k, p.getAmount().doubleValue(), Double::sum);
+            BillPaymentMode m = le.getPaymentMode() != null ? le.getPaymentMode() : BillPaymentMode.OTHER;
+            paymentSummary.merge(m.name(), le.getAmount().doubleValue(), Double::sum);
         }
-
-        BigDecimal inHandCollectedFromBills = collectedInPeriod.stream()
-                .filter(p -> p.getPaymentMode() == BillPaymentMode.CASH || p.getPaymentMode() == BillPaymentMode.UPI)
-                .map(BillPayment::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-
-        BigDecimal expenses = expenseRepository.findByLocationAndDateBetween(loc, from, to).stream()
-                .map(Expense::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
 
         LocalDateTime periodStart = from.atStartOfDay();
         LocalDateTime periodEndExclusive = to.plusDays(1).atStartOfDay();
-        List<CustomerAdvance> advanceDepositsInPeriod = customerAdvanceRepository
-                .findDepositsForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive);
-        BigDecimal advanceDeposits = customerAdvanceRepository
-                .sumDepositsForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive)
-                .setScale(2, RoundingMode.HALF_UP);
         BigDecimal advanceApplied = customerAdvanceUsageRepository
                 .sumUsageForLocationAndCreatedAtRange(loc, periodStart, periodEndExclusive)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal advanceDeposits = creditRows.stream()
+                .filter(le -> "ADVANCE".equals(le.getSourceType()) || "ADVANCE_DEPOSIT".equals(le.getSourceType()))
+                .map(FinancialLedgerEntry::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
         BigDecimal advanceAvailable = advanceDeposits.subtract(advanceApplied).setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal advanceInHand = ZERO;
-        for (CustomerAdvance adv : advanceDepositsInPeriod) {
-            if (adv.getAmount() == null) {
-                continue;
-            }
-            BigDecimal amount = adv.getAmount().setScale(2, RoundingMode.HALF_UP);
-            BillPaymentMode mode = adv.getPaymentMode() != null ? adv.getPaymentMode() : BillPaymentMode.CASH;
-            paymentSummary.merge(mode.name(), amount.doubleValue(), Double::sum);
-            if (mode == BillPaymentMode.CASH || mode == BillPaymentMode.UPI) {
-                advanceInHand = advanceInHand.add(amount);
-            }
-        }
-
-        BigDecimal totalCollected = totalCollectedFromBills.add(advanceDeposits).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal inHandCollected = inHandCollectedFromBills.add(advanceInHand).setScale(2, RoundingMode.HALF_UP);
-
-        List<ClientTransaction> clientInflowRows = clientTransactionRepository
-                .findByLocationAndTransactionTypeAndTransactionDateBetweenOrderByTransactionDateDescIdDesc(
-                        loc, ClientTransactionType.PAYMENT_IN, from, to);
-        BigDecimal clientPaymentsIn = clientInflowRows.stream()
-                .map(ClientTransaction::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal clientInHand = clientInflowRows.stream()
-                .filter(tx -> tx.getPaymentMode() == BillPaymentMode.CASH || tx.getPaymentMode() == BillPaymentMode.UPI)
-                .map(ClientTransaction::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
-        for (ClientTransaction tx : clientInflowRows) {
-            BillPaymentMode mode = tx.getPaymentMode() != null ? tx.getPaymentMode() : BillPaymentMode.OTHER;
-            BigDecimal amount = tx.getAmount() != null ? tx.getAmount().setScale(2, RoundingMode.HALF_UP) : ZERO;
-            paymentSummary.merge(mode.name(), amount.doubleValue(), Double::sum);
-        }
-
-        totalCollected = totalCollected.add(clientPaymentsIn).setScale(2, RoundingMode.HALF_UP);
-        inHandCollected = inHandCollected.add(clientInHand).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal cashInHand = inHandCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalCollected = totalCredits;
+        BigDecimal cashInHand = totalCredits.subtract(totalDebits).setScale(2, RoundingMode.HALF_UP);
 
         BigDecimal dueOnBills = pendingOnBilledDay.setScale(2, RoundingMode.HALF_UP);
 
@@ -269,7 +215,9 @@ public class DailyClosingReportService {
                 .warnings(warnings)
                 .collectionsReconciliationOk(reconOk)
                 .collectionsReconciliationDelta(reconDelta.doubleValue())
-                .totalExpenses(expenses.doubleValue())
+                .totalExpenses(totalDebits.doubleValue())
+                .totalOutflow(totalDebits.doubleValue())
+                .expenseOnlyTotal(expenseOnlyLedger.doubleValue())
                 .totalAdvanceDeposits(advanceDeposits.doubleValue())
                 .totalAdvanceAppliedOnBills(advanceApplied.doubleValue())
                 .totalAdvanceAvailable(advanceAvailable.doubleValue())
@@ -293,7 +241,7 @@ public class DailyClosingReportService {
         return map;
     }
 
-    private void backfillLegacyPaymentIfNeededGst(BillGST bill) {
+    private void backfillLegacyPaymentIfNeededGst(BillGST bill, String location) {
         List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId());
         if (!existing.isEmpty()) {
             return;
@@ -317,10 +265,11 @@ public class DailyClosingReportService {
         row.setAmount(bill.getTotalAmount().setScale(2, RoundingMode.HALF_UP));
         row.setPaymentMode(mode);
         row.setPaymentDate(bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now());
-        billPaymentRepository.save(row);
+        BillPayment saved = billPaymentRepository.save(row);
+        publishBillPaymentLedgerSync(location, BillKind.GST, bill.getId(), saved);
     }
 
-    private void backfillLegacyPaymentIfNeededNon(BillNonGST bill) {
+    private void backfillLegacyPaymentIfNeededNon(BillNonGST bill, String location) {
         List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, bill.getId());
         if (!existing.isEmpty()) {
             return;
@@ -344,7 +293,23 @@ public class DailyClosingReportService {
         row.setAmount(bill.getTotalAmount().setScale(2, RoundingMode.HALF_UP));
         row.setPaymentMode(mode);
         row.setPaymentDate(bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now());
-        billPaymentRepository.save(row);
+        BillPayment saved = billPaymentRepository.save(row);
+        publishBillPaymentLedgerSync(location, BillKind.NON_GST, bill.getId(), saved);
+    }
+
+    private void publishBillPaymentLedgerSync(String billLocation, BillKind kind, Long billId, BillPayment saved) {
+        if (billLocation == null || billLocation.isBlank() || saved == null || saved.getId() == null) {
+            return;
+        }
+        eventPublisher.publishEvent(new BillPaymentLedgerSyncEvent(
+                billLocation.trim(),
+                kind,
+                billId,
+                saved.getId(),
+                saved.getPaymentMode(),
+                saved.getAmount(),
+                saved.getPaymentDate(),
+                true));
     }
 
     private static String paymentKey(BillKind kind, Long billId) {
@@ -552,64 +517,20 @@ public class DailyClosingReportService {
 
     public PaymentModeTotalsDTO paymentModeTotalsForSales(LocalDate from, LocalDate to, String location) {
         final String loc = location == null ? "" : location.trim();
-        List<BillPayment> rows = from.equals(to)
-                ? billPaymentRepository.findByPaymentDateAndBillLocation(loc, from)
-                : billPaymentRepository.findByPaymentDateBetweenAndBillLocation(loc, from, to);
-
+        List<FinancialLedgerEntry> credits = financialLedgerRepository.findCreditsByLocationAndDateRange(loc, from, to);
         BigDecimal upi = ZERO, cash = ZERO, bank = ZERO, cheque = ZERO, other = ZERO;
-        for (BillPayment p : rows) {
-            if (p.getAmount() == null) continue;
-            BigDecimal a = p.getAmount().setScale(2, RoundingMode.HALF_UP);
-            if (p.getPaymentMode() == null) {
-                other = other.add(a);
+        for (FinancialLedgerEntry le : credits) {
+            if (!"BILL_PAYMENT".equals(le.getSourceType()) || le.getAmount() == null) {
                 continue;
             }
-            switch (p.getPaymentMode()) {
+            BigDecimal a = le.getAmount().setScale(2, RoundingMode.HALF_UP);
+            BillPaymentMode mode = le.getPaymentMode() != null ? le.getPaymentMode() : BillPaymentMode.OTHER;
+            switch (mode) {
                 case UPI -> upi = upi.add(a);
                 case CASH -> cash = cash.add(a);
                 case BANK_TRANSFER -> bank = bank.add(a);
                 case CHEQUE -> cheque = cheque.add(a);
                 default -> other = other.add(a);
-            }
-        }
-
-        // Backend-only legacy fallback for old bills without payment rows.
-        List<BillGST> gstBills = billGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
-        for (BillGST b : gstBills) {
-            if (rows.stream().anyMatch(p -> p.getBillKind() == BillKind.GST && Objects.equals(p.getBillId(), b.getId()))) continue;
-            if (b.getPaymentStatus() != BillGST.PaymentStatus.PAID) continue;
-            BigDecimal total = b.getPaidAmount() != null ? b.getPaidAmount() : b.getTotalAmount();
-            if (total == null || total.compareTo(ZERO) <= 0) continue;
-            BillPaymentMode mode = parseLegacyMode(b.getPaymentMethod());
-            if (mode == null) {
-                other = other.add(total);
-            } else if (mode == BillPaymentMode.UPI) {
-                upi = upi.add(total);
-            } else if (mode == BillPaymentMode.CASH) {
-                cash = cash.add(total);
-            } else if (mode == BillPaymentMode.BANK_TRANSFER) {
-                bank = bank.add(total);
-            } else if (mode == BillPaymentMode.CHEQUE) {
-                cheque = cheque.add(total);
-            }
-        }
-        List<BillNonGST> nonBills = billNonGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
-        for (BillNonGST b : nonBills) {
-            if (rows.stream().anyMatch(p -> p.getBillKind() == BillKind.NON_GST && Objects.equals(p.getBillId(), b.getId()))) continue;
-            if (b.getPaymentStatus() != BillNonGST.PaymentStatus.PAID) continue;
-            BigDecimal total = b.getPaidAmount() != null ? b.getPaidAmount() : b.getTotalAmount();
-            if (total == null || total.compareTo(ZERO) <= 0) continue;
-            BillPaymentMode mode = parseLegacyMode(b.getPaymentMethod());
-            if (mode == null) {
-                other = other.add(total);
-            } else if (mode == BillPaymentMode.UPI) {
-                upi = upi.add(total);
-            } else if (mode == BillPaymentMode.CASH) {
-                cash = cash.add(total);
-            } else if (mode == BillPaymentMode.BANK_TRANSFER) {
-                bank = bank.add(total);
-            } else if (mode == BillPaymentMode.CHEQUE) {
-                cheque = cheque.add(total);
             }
         }
 
@@ -624,43 +545,30 @@ public class DailyClosingReportService {
 
     public ReconciliationReportDTO reconciliation(LocalDate date, String location) {
         String loc = location == null ? "" : location.trim();
-        BigDecimal ledgerTotal = financialLedgerRepository
-                .sumInHandByLocationAndDateRange(loc, date, date)
+        BigDecimal credits = financialLedgerRepository
+                .sumAmountByLocationAndDateAndEntryType(loc, date, LedgerEntryType.CREDIT)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal debits = financialLedgerRepository
+                .sumAmountByLocationAndDateAndEntryType(loc, date, LedgerEntryType.DEBIT)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal ledgerNet = credits.subtract(debits).setScale(2, RoundingMode.HALF_UP);
 
-        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
-                .or(() -> dailyBudgetRepository.findByLocation(loc))
-                .orElse(null);
-        BigDecimal budgetNetMovement = ZERO.setScale(2, RoundingMode.HALF_UP);
-        if (budget != null && budget.getAmount() != null && budget.getRemainingBudget() != null) {
-            // Movement produced by collection adjustments beyond planned budget-spend baseline.
-            budgetNetMovement = budget.getRemainingBudget().subtract(budget.getAmount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal modeSum = ZERO;
+        for (BillPaymentMode m : BillPaymentMode.values()) {
+            modeSum = modeSum.add(financialLedgerRepository
+                    .sumCreditByLocationDateRangeAndMode(loc, date, date, m)
+                    .setScale(2, RoundingMode.HALF_UP));
         }
-        BigDecimal delta = ledgerTotal.subtract(budgetNetMovement).setScale(2, RoundingMode.HALF_UP);
-        boolean ok = delta.abs().compareTo(new BigDecimal("0.02")) <= 0;
+        BigDecimal delta = modeSum.subtract(credits).abs().setScale(2, RoundingMode.HALF_UP);
+        boolean ok = delta.compareTo(new BigDecimal("0.02")) <= 0;
         return new ReconciliationReportDTO(
                 loc,
                 String.valueOf(date),
-                ledgerTotal.doubleValue(),
-                budgetNetMovement.doubleValue(),
+                ledgerNet.doubleValue(),
+                debits.doubleValue(),
                 delta.doubleValue(),
                 ok ? "OK" : "WARNING",
-                ok ? "Ledger and budget are reconciled." : "Mismatch between ledger and budget movements.");
-    }
-
-    private static BillPaymentMode parseLegacyMode(String raw) {
-        if (raw == null || raw.isBlank() || "-".equals(raw.trim())) {
-            return null;
-        }
-        String t = raw.trim().toUpperCase(Locale.ROOT);
-        if (t.startsWith("C")) return BillPaymentMode.CASH;
-        if (t.startsWith("U")) return BillPaymentMode.UPI;
-        if (t.startsWith("B")) return BillPaymentMode.BANK_TRANSFER;
-        if (t.startsWith("Q")) return BillPaymentMode.CHEQUE;
-        try {
-            return BillPaymentMode.parseFlexible(raw);
-        } catch (IllegalArgumentException ex) {
-            return null;
-        }
+                ok ? "Ledger net = credits - debits; payment-mode credit sum matches total credits."
+                        : "Sum of credit rows by payment mode differs from total credits by " + delta.toPlainString() + ".");
     }
 }

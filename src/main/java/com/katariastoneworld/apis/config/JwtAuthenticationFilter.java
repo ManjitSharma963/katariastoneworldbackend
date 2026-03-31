@@ -1,6 +1,7 @@
 package com.katariastoneworld.apis.config;
 
 import com.katariastoneworld.apis.service.JwtUtil;
+import com.katariastoneworld.apis.util.LedgerAuditContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -84,8 +85,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         
         // Token is valid, continue with the request
         // Add user info to request attributes
+        final Long userId;
         try {
-            Long userId = jwtUtil.extractUserId(token);
+            userId = jwtUtil.extractUserId(token);
             String email = jwtUtil.extractEmail(token);
             String role = jwtUtil.extractRole(token);
             String location = jwtUtil.extractLocation(token);
@@ -97,8 +99,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             sendUnauthorizedResponse(response, "Invalid token format", false);
             return;
         }
-        
-        filterChain.doFilter(request, response);
+
+        try {
+            LedgerAuditContext.setUserId(userId);
+            filterChain.doFilter(request, response);
+        } finally {
+            LedgerAuditContext.clear();
+        }
     }
     
     private boolean isPublicEndpoint(String path, String method) {

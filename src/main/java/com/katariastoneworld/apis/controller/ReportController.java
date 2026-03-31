@@ -2,9 +2,14 @@ package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.DailyClosingReportDTO;
+import com.katariastoneworld.apis.dto.LedgerSummaryDTO;
+import com.katariastoneworld.apis.dto.PaymentModeLedgerAnalyticsDTO;
 import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
+import com.katariastoneworld.apis.dto.ProfitLossReportDTO;
+import com.katariastoneworld.apis.dto.ReferenceTypeExpenseReportDTO;
 import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.service.DailyClosingReportService;
+import com.katariastoneworld.apis.service.FinancialLedgerService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -32,6 +37,88 @@ public class ReportController {
 
     @Autowired
     private DailyClosingReportService dailyClosingReportService;
+
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
+
+    @Operation(summary = "Ledger summary (dashboard)",
+            description = """
+                    Location from JWT. **totalCredit** / **totalDebit** / **netBalance** from `financial_ledger`
+                    (`is_deleted = 0`) for the inclusive date range; defaults to **today** only.
+                    **expenseDebitTotal** is DEBIT with `source_type = EXPENSE` only.
+                    """)
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = LedgerSummaryDTO.class)))
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/summary")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<LedgerSummaryDTO> ledgerSummary(
+            @Parameter(description = "Start date (inclusive). Default: today.")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @Parameter(description = "End date (inclusive). Default: same as date.")
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate start = date != null ? date : LocalDate.now();
+        LocalDate end = dateTo != null ? dateTo : start;
+        return ResponseEntity.ok(financialLedgerService.summarize(location, start, end));
+    }
+
+    @Operation(summary = "Profit and loss (ledger)",
+            description = """
+                    Location from JWT. **revenue** = sum of CREDIT amounts, **expense** = sum of DEBIT amounts,
+                    **net** = revenue − expense, from `financial_ledger` with `is_deleted = 0` (same basis as `/summary`).
+                    """)
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ProfitLossReportDTO.class)))
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/profit-loss")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<ProfitLossReportDTO> profitLoss(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate start = date != null ? date : LocalDate.now();
+        LocalDate end = dateTo != null ? dateTo : start;
+        return ResponseEntity.ok(financialLedgerService.profitAndLoss(location, start, end));
+    }
+
+    @Operation(summary = "Expense-style breakdown by reference_type",
+            description = """
+                    Location from JWT. Sums **DEBIT** rows in `financial_ledger` grouped by **reference_type**
+                    (null → `"(none)"`). Use for category-style views; manual expenses typically use reference_type **EXPENSE**.
+                    """)
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ReferenceTypeExpenseReportDTO.class)))
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/expenses-by-reference-type")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<ReferenceTypeExpenseReportDTO> expensesByReferenceType(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate start = date != null ? date : LocalDate.now();
+        LocalDate end = dateTo != null ? dateTo : start;
+        return ResponseEntity.ok(financialLedgerService.expensesByReferenceType(location, start, end));
+    }
+
+    @Operation(summary = "Payment mode analytics (ledger)",
+            description = """
+                    Location from JWT. For each **payment_mode**, returns **creditTotal**, **debitTotal**, and **net**
+                    (credit − debit) from `financial_ledger` (`is_deleted = 0`). Modes with no activity are omitted.
+                    """)
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = PaymentModeLedgerAnalyticsDTO.class)))
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/ledger-payment-modes")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<PaymentModeLedgerAnalyticsDTO> ledgerPaymentModes(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate start = date != null ? date : LocalDate.now();
+        LocalDate end = dateTo != null ? dateTo : start;
+        return ResponseEntity.ok(financialLedgerService.paymentModeLedgerAnalytics(location, start, end));
+    }
 
     @Operation(summary = "Daily closing report",
             description = """

@@ -66,8 +66,17 @@ public class DailyClosingReportDTO {
     /** Absolute difference between sum(paymentSummary) and totalCollected (for support; should be ~0). */
     private Double collectionsReconciliationDelta;
 
-    /** Sum of expenses ({@code expenses.date}) for location on {@code date}. */
+    /**
+     * All DEBIT in the period (ledger): salary, expenses, client debits, etc.
+     * Same as {@link #totalOutflow}; kept for older clients.
+     */
     private Double totalExpenses;
+
+    /** All DEBIT in the period from {@code financial_ledger} ({@code is_deleted = 0}). */
+    private Double totalOutflow;
+
+    /** DEBIT rows with {@code source_type = EXPENSE} only (aligns with manual expense list when ledger is in sync). */
+    private Double expenseOnlyTotal;
 
     /**
      * Sum of new customer advance/token deposits ({@code customer_advance.amount}) with {@code created_at}

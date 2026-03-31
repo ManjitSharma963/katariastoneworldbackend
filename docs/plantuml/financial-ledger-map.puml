@@ -1,0 +1,60 @@
+@startuml financial-ledger-map
+skinparam shadowing false
+skinparam linetype ortho
+title Financial ledger — who writes & how reports read
+
+rectangle "Writers → financial_ledger" as W {
+  rectangle "**BillService**\n(save payment)" as BS
+  rectangle "**BillPaymentLedgerSyncEvent**\n→ listener → sync" as BP
+
+  rectangle "**ExpenseService**" as ES
+  rectangle "**upsertExpenseLedger**\nEXPENSE · DEBIT" as EX
+
+  rectangle "**CustomerAdvanceService**\n(deposit)" as CA
+  rectangle "**recordAdvanceDeposit**\nADVANCE · CREDIT" as AD
+
+  rectangle "**ClientTransactionService**" as CT
+  rectangle "IN → CREDIT\nOUT/PURCHASE → DEBIT" as CT2
+
+  rectangle "**PayrollLedgerService**" as PL
+  rectangle "SALARY · EMPLOYEE_ADVANCE\nDEBIT" as PL2
+
+  rectangle "**DailyClosingReportService**\nlegacy PAID backfill" as DC
+  rectangle "**BillPaymentLedgerSyncEvent**" as DC2
+}
+
+rectangle "Readers (money totals from ledger)" as R {
+  rectangle "**DailyBudgetService**\nΣCREDIT − ΣDEBIT / day" as DB
+  rectangle "**DailyClosingReportService**\ncollected · outflow · expense-only" as DCR
+  rectangle "**/api/reports/summary**" as SUM
+}
+
+BS --> BP
+ES --> EX
+CA --> AD
+CT --> CT2
+PL --> PL2
+DC --> DC2
+
+database "**financial_ledger**" as L
+
+BP --> L
+EX --> L
+AD --> L
+CT2 --> L
+PL2 --> L
+DC2 --> L
+
+DB ..> L : read aggregates
+DCR ..> L : read aggregates
+SUM ..> L : read aggregates
+
+note bottom of L
+  **Columns (conceptual):** entry_type, source_type, source_id,
+  amount, payment_mode, event_date, location,
+  reference_type/id, is_deleted.
+  **Unique:** (source_type, source_id, is_deleted).
+  **Indexes:** (event_date, location), (entry_type), …
+end note
+
+@enduml

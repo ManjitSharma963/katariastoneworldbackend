@@ -1,0 +1,109 @@
+@startmindmap
+skinparam backgroundColor #FEFEFE
+title Kataria Stone World — functionality and system effects (current model)
+
+* **Root: Backend + Inventory SPA**
+
+left side
+
+** (1) Auth /api/auth
+*** Register, Login, /me
+**** users + JWT; **location** + **role** scope
+
+** (2) Customers /api/customers
+*** CRUD, phone lookup
+**** **customers**; bills & advances FK
+
+** (3) Inventory /api/inventory
+*** Product CRUD, stock, history
+**** **products**; supplier/dealer; **product_change_history**, **inventory_history**
+
+** (4) Bills /api/bills
+*** Create GST / Non-GST
+**** **bills_*** + **bill_items_***; stock down + **inventory_history** (SALE)
+**** FIFO advance: **customer_advance_usage**, advance **remaining_amount**
+**** Initial / line **bill_payments** → **syncBillPayment** → **financial_ledger** (CREDIT)
+**** **paid_amount**, **payment_status** on bill (UI / AR, not report money total)
+**** email bill (async)
+*** Payment add / update / delete
+**** **bill_payments**; **syncBillPayment** (active / soft-delete ledger)
+*** List, sales, PDF
+**** reads + PDF stream
+
+** (5) Customer advance /api/customer/advance
+*** POST advance (deposit)
+**** **customer_advance**; **financial_ledger** source **ADVANCE** (CREDIT)
+*** Use on bill
+**** **customer_advance_usage** only — **no** extra ledger line (already credited at deposit)
+*** summary, history
+**** reads
+
+** (6) Client transactions /api/client-transactions
+*** PAYMENT_IN
+**** **client_transactions**; ledger **CLIENT_PAYMENT_IN** (CREDIT)
+*** PAYMENT_OUT, PURCHASE
+**** **client_transactions**; ledger **CLIENT_TRANSACTION** (DEBIT) — **no** mirror **expenses** row
+*** list
+**** reads
+
+** (7) Client purchases /api/client-purchases
+*** CRUD + payments
+**** **client_purchases**, **client_purchase_payments**
+
+** (8) Expenses /api/expenses
+*** CRUD
+**** **expenses** table (register / lines)
+**** **upsertExpenseLedger** / soft-delete → **financial_ledger** EXPENSE (DEBIT)
+**** **no** **daily_budget.remaining_budget** adjustments
+
+** (9) Employees /api/employees
+*** CRUD
+**** **employees**
+
+** (10) Payroll /api/payroll
+*** employee advance, salary settlement
+**** **employee_payroll_ledger** + **financial_ledger** (SALARY, EMPLOYEE_ADVANCE DEBIT)
+**** **no** payroll → **expenses** mirror; **no** budget in-hand hacks
+
+** (11) Reports /api/reports
+*** **GET /summary** — totalCredit, totalDebit, netBalance, expenseDebitTotal (dashboard)
+*** daily-closing, payment-mode-summary, reconciliation
+**** aggregates from **financial_ledger** for money totals; bills table for **invoice detail**
+
+** (12) Daily budget /api/budget/daily
+*** CRUD + status
+**** **daily_budget.amount** = optional daily **cap** (informational)
+**** **status** = ledger **ΣCREDIT − ΣDEBIT** for date (not stored remaining column in entity)
+
+** (13) Suppliers / Dealers
+*** **suppliers**, **dealers**
+
+** (14) Categories /api/categories
+*** **categories**
+
+** (15) Website + Heroes
+*** **website_product**, **hero_slides**
+
+right side
+
+** Cross-cutting
+*** JWT **location** on data
+*** **is_deleted** soft filters (bills, payments, expenses, ledger)
+*** **financial_ledger** unique (**source_type**, **source_id**)
+
+** Core money engine
+*** **FinancialLedgerService** — **createEntry**, **syncBillPayment**, helpers
+*** Idempotent active row per source key; **reactivate** if soft-deleted
+
+** Not exposed as CRUD
+*** Ledger rows only via domain services above
+
+** External I/O
+*** **EmailService** (bills)
+*** **PdfService** (bills)
+
+** Inventory SPA
+*** **fetchReportsLedgerSummary** for dashboard money strip
+*** same APIs as above
+
+@endmindmap

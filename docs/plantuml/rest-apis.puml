@@ -1,0 +1,205 @@
+@startuml rest-apis
+' HTTP surface from @RestController classes (primary /api/... paths)
+' Dual paths like /bills and /api/bills — only /api listed unless unique
+
+skinparam shadowing false
+skinparam packageStyle rectangle
+title Kataria Stone World — REST API map (from controllers)
+
+package "Auth — /api/auth" {
+  rectangle auth {
+    POST /register
+    POST /login
+    GET /me
+  }
+}
+
+package "Customers — /api/customers" {
+  rectangle cust {
+    POST /
+    GET /
+    GET /{id}
+    GET /phone/{phone}
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+package "Inventory / products — /api/inventory" {
+  rectangle inv {
+    POST /
+    GET /
+    POST /add-stock
+    POST /update-stock
+    GET /history/{productId}
+    GET /product-changes/{productId}
+    GET /{id}
+    GET /slug/{slug}
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+package "Bills — /api/bills" {
+  rectangle bills {
+    POST /
+    GET /
+    GET /{id}
+    GET /{billType}/{id}
+    GET /number/{billNumber}
+    GET /sales
+    GET /customer/{mobileNumber}
+    POST /test-email
+    GET /number/{billNumber}/download
+    GET /gst/{id}/download
+    GET /nongst/{id}/download
+    GET /{billType}/{id}/download
+    POST /{billType}/{id}/payments
+    PUT /{billType}/{id}/payments/{paymentId}
+    DELETE /{billType}/{id}/payments/{paymentId}
+  }
+}
+
+package "Customer advance — /api/customer/advance" {
+  rectangle adv {
+    POST /
+    GET /summary
+    GET /history
+  }
+}
+
+package "Client transactions — /api/client-transactions" {
+  rectangle ctx {
+    POST /
+    GET /
+  }
+}
+
+package "Client purchases — /api/client-purchases" {
+  rectangle cp {
+    POST /
+    GET /
+    GET /{id}
+    PUT /{id}
+    DELETE /{id}
+    POST /{id}/payments
+    GET /payments
+    GET /{id}/payments
+  }
+}
+
+package "Expenses — /api/expenses" {
+  rectangle exp {
+    POST /
+    GET /
+    GET /{id}
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+package "Employees — /api/employees" {
+  rectangle emp {
+    POST /
+    GET /
+    GET /{id}
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+package "Payroll — /api/payroll" {
+  rectangle pay {
+    POST /employees/{employeeId}/advance
+    POST /employees/{employeeId}/salary-settlement
+    GET /employees/summary
+    GET /employees/{employeeId}/ledger
+  }
+}
+
+package "Mobile — /api/mobile" {
+  rectangle mob {
+    GET /dashboard
+  }
+}
+
+package "Audit — /api/audit (admin)" {
+  rectangle aud {
+    GET /ledger
+    GET /bill/{billId}
+  }
+}
+
+package "Reports — /api/reports" {
+  rectangle rep {
+    GET /summary
+    GET /profit-loss
+    GET /expenses-by-reference-type
+    GET /ledger-payment-modes
+    GET /daily-closing
+    GET /payment-mode-summary
+    GET /reconciliation
+  }
+}
+
+package "Daily budget — /api/budget/daily (also /api/daily-budget)" {
+  rectangle bud {
+    GET /all
+    GET /
+    GET /by-date
+    PUT /
+    POST /
+    DELETE /
+  }
+}
+
+package "Categories — /api/categories" {
+  rectangle cat {
+    POST /
+    GET /
+    GET /{id}
+  }
+}
+
+package "Suppliers — /api/suppliers" {
+  rectangle sup {
+    GET /
+    POST /
+  }
+}
+
+package "Dealers — /api/dealers" {
+  rectangle deal {
+    GET /
+    POST /
+  }
+}
+
+package "Website products — /api/website-products" {
+  rectangle wp {
+    GET /
+    GET /{id}
+    GET /slug/{slug}
+    POST /
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+package "Hero slides — /api/heroes" {
+  rectangle hero {
+    GET /
+    GET /active
+    GET /{id}
+    POST /
+    PUT /{id}
+    DELETE /{id}
+  }
+}
+
+note bottom
+  Many controllers also accept the same path **without** /api (legacy),
+  e.g. /bills, /inventory, /employees. Secured routes use JWT + @RequiresRole where applied.
+end note
+
+@enduml

@@ -2,7 +2,7 @@ package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionResponseDTO;
-import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
+import com.katariastoneworld.apis.dto.LedgerRequest;
 import com.katariastoneworld.apis.entity.*;
 import com.katariastoneworld.apis.repository.ClientTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,9 +19,6 @@ public class ClientTransactionService {
 
     @Autowired
     private ClientTransactionRepository clientTransactionRepository;
-
-    @Autowired
-    private ExpenseService expenseService;
 
     @Autowired
     private FinancialLedgerService financialLedgerService;
@@ -44,18 +41,17 @@ public class ClientTransactionService {
         ClientTransaction saved = clientTransactionRepository.save(tx);
 
         if (type == ClientTransactionType.PAYMENT_OUT || type == ClientTransactionType.PURCHASE) {
-            // Mirror outflow to expenses so old reports keep working.
-            ExpenseRequestDTO ex = new ExpenseRequestDTO();
-            ex.setType("daily");
-            ex.setCategory("inventory");
-            ex.setDate(d);
-            ex.setAmount(amt);
-            ex.setPaymentMethod(toLegacyExpensePaymentMethod(mode));
-            ex.setDescription("Client transaction outflow: " + type.name() + " - " + saved.getClientId());
-            ex.setExpenseCategory(ExpenseCategory.INVENTORY.name());
-            ex.setReferenceType(ReferenceType.CLIENT.name());
-            ex.setReferenceId(String.valueOf(saved.getId()));
-            expenseService.createExpense(ex, location);
+            financialLedgerService.createEntry(LedgerRequest.builder()
+                    .location(location)
+                    .sourceType("CLIENT_TRANSACTION")
+                    .sourceId(String.valueOf(saved.getId()))
+                    .entryType(LedgerEntryType.DEBIT)
+                    .amount(amt)
+                    .paymentMode(mode)
+                    .referenceType("CUSTOMER")
+                    .referenceId(saved.getClientId())
+                    .eventDate(d)
+                    .build());
         } else if (type == ClientTransactionType.PAYMENT_IN) {
             financialLedgerService.recordClientPaymentIn(
                     location,
@@ -98,16 +94,4 @@ public class ClientTransactionService {
                 .createdAt(row.getCreatedAt())
                 .build();
     }
-
-    private static String toLegacyExpensePaymentMethod(BillPaymentMode mode) {
-        if (mode == null) return "cash";
-        return switch (mode) {
-            case CASH -> "cash";
-            case UPI -> "upi";
-            case BANK_TRANSFER -> "bank";
-            case CHEQUE -> "cheque";
-            case OTHER -> "other";
-        };
-    }
 }
-

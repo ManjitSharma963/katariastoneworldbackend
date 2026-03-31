@@ -1,0 +1,241 @@
+@startuml database-erd
+' Generated from JPA entities under com.katariastoneworld.apis.entity
+' Render with PlantUML (VS Code extension, plantuml.com, or CLI)
+
+skinparam linetype ortho
+skinparam shadowing false
+title Kataria Stone World — database mapping (from @Entity / @Table)
+
+entity "users" as users {
+  * id : BIGINT <<PK>>
+  --
+  username, email, password, role, location, ...
+  created_at, updated_at
+}
+
+entity "employees" as employees {
+  * id : BIGINT <<PK>>
+  --
+  user_id → users
+  name, phone, salary, joining_date, location, ...
+}
+
+entity "customers" as customers {
+  * id : BIGINT <<PK>>
+  --
+  phone, email, location, notes, user_id, ...
+}
+
+entity "categories" as categories {
+  * id : BIGINT <<PK>>
+  --
+  name, category_type, display_order, is_active, ...
+}
+
+entity "suppliers" as suppliers {
+  * id : BIGINT <<PK>>
+  --
+  name, contact_number, address, location, created_at
+}
+
+entity "dealers" as dealers {
+  * id : BIGINT <<PK>>
+  --
+  name, contact_number, address, location, created_at
+}
+
+entity "products" as products {
+  * id : BIGINT <<PK>>
+  --
+  category_id, owner_user_id, slug (unique with owner)
+  supplier_id → suppliers
+  dealer_id → dealers
+  stock, pricing, hsn_number, location, ...
+}
+
+entity "bills_gst" as bills_gst {
+  * id : BIGINT <<PK>>
+  --
+  customer_id → customers
+  bill_number, bill_date, totals, payment_status, paid_amount
+  location, is_deleted, hsn_code, vehicle_no, ...
+}
+
+entity "bills_non_gst" as bills_non_gst {
+  * id : BIGINT <<PK>>
+  --
+  customer_id → customers
+  bill_number, bill_date, totals, payment_status, paid_amount
+  location, is_deleted, ...
+}
+
+entity "bill_items_gst" as bill_items_gst {
+  * id : INT <<PK>>
+  --
+  bill_id → bills_gst
+  product_id → products (nullable)
+  product_name, qty, prices, hsn_number, ...
+}
+
+entity "bill_items_non_gst" as bill_items_non_gst {
+  * id : INT <<PK>>
+  --
+  bill_id → bills_non_gst
+  product_id → products (nullable)
+  product_name, qty, prices, ...
+}
+
+entity "bill_payments" as bill_payments {
+  * payment_id : BIGINT <<PK>>
+  --
+  bill_kind (GST | NON_GST), bill_id (logical FK to gst/non-gst bill)
+  amount, payment_mode, payment_date, is_deleted, ...
+}
+
+entity "**customer_advance**" as customer_advance {
+  * **id** : BIGINT <<PK>>
+  --
+  customer_id → customers
+  amount, remaining_amount, payment_mode, ...
+}
+
+entity "customer_advance_usage" as customer_advance_usage {
+  * id : BIGINT <<PK>>
+  --
+  advance_id → customer_advance
+  bill_kind, bill_id, amount_used, ...
+}
+
+entity "financial_ledger" as financial_ledger {
+  * id : BIGINT <<PK>>
+  --
+  **UK** (source_type, source_id, is_deleted)
+  entry_type (CREDIT | DEBIT)
+  source_type, source_id (polymorphic business key)
+  reference_type, reference_id (optional)
+  event_type, location, amount, payment_mode, event_date
+  in_hand_amount (deprecated; app writes 0; use amount + entry_type + payment_mode)
+  created_at, created_by, updated_at, updated_by
+  is_deleted (soft void)
+  bill_kind, bill_id, customer_id (optional context)
+  created_at
+}
+
+entity "client_transactions" as client_transactions {
+  * id : BIGINT <<PK>>
+  --
+  client_id (string ref), transaction_type, amount, location, ...
+}
+
+entity "employee_payroll_ledger" as employee_payroll_ledger {
+  * id : BIGINT <<PK>>
+  --
+  employee_id (logical → employees), event_type, month, amount, ...
+}
+
+entity "expenses" as expenses {
+  * id : BIGINT <<PK>>
+  --
+  employee_id, expense_category, reference_type, reference_id
+  amount, date, location, is_deleted, ...
+}
+
+entity "product_change_history" as product_change_history {
+  * id : BIGINT <<PK>>
+  --
+  product_id → products
+  previous_snapshot, new_snapshot, notes, created_at
+}
+
+entity "inventory_history" as inventory_history {
+  * id : BIGINT <<PK>>
+  --
+  product_id → products
+  action_type, quantity deltas, reference_id, ...
+}
+
+entity "website_product" as website_product {
+  * id : BIGINT <<PK>>
+  --
+  title, slug, category_id, pricing, media URLs, ...
+}
+
+entity "hero_slides" as hero_slides {
+  * id : BIGINT <<PK>>
+  --
+  image_url, display_order, is_active, ...
+}
+
+entity "daily_budget" as daily_budget {
+  * id : BIGINT <<PK>>
+  --
+  unique (user_id, location)
+  amount (optional daily cap, informational)
+  user_id, location, created_at, updated_at
+}
+
+entity "state_gst_master" as state_gst_master {
+  * id : BIGINT <<PK>>
+  --
+  state_name, gst_code
+}
+
+entity "sellers" as sellers {
+  * id : BIGINT <<PK>>
+  --
+  name, gst_no, bank details, terms, ...
+}
+
+entity "client_purchases" as client_purchases {
+  * id : BIGINT <<PK>>
+  --
+  client_name, total_amount, purchase_date, location, user_id, ...
+}
+
+entity "client_purchase_payments" as client_purchase_payments {
+  * id : BIGINT <<PK>>
+  --
+  client_purchase_id → client_purchases
+  client_id, amount, payment_method, ...
+}
+
+' --- JPA navigable associations ---
+customers ||--o{ bills_gst : "has"
+customers ||--o{ bills_non_gst : "has"
+bills_gst ||--o{ bill_items_gst : "lines"
+bills_non_gst ||--o{ bill_items_non_gst : "lines"
+products o--o| bill_items_gst : "optional line product"
+products o--o| bill_items_non_gst : "optional line product"
+suppliers ||--o{ products : "optional"
+dealers ||--o{ products : "optional"
+customers ||--o{ customer_advance : "has"
+customer_advance ||--o{ customer_advance_usage : "usage rows"
+client_purchases ||--o{ client_purchase_payments : "payments"
+products ||--o{ product_change_history : "audit"
+products ||--o{ inventory_history : "audit"
+
+note right of bill_payments
+  No @ManyToOne in JPA:
+  bill_kind + bill_id reference GST or NON_GST bills.
+end note
+
+note right of financial_ledger
+  **UK:** (source_type, source_id, is_deleted).
+  **Money totals** = SUM (CREDIT vs DEBIT, **is_deleted** = 0).
+  **Bill payments:** **BillPaymentLedgerSyncEvent** → listener → ledger (same DB transaction as **bill_payments**).
+  **source_type** examples: BILL_PAYMENT, EXPENSE, ADVANCE,
+  CLIENT_PAYMENT_IN, CLIENT_TRANSACTION, SALARY, EMPLOYEE_ADVANCE.
+end note
+
+note bottom
+  Enum types (BillKind, BillPaymentMode, ExpenseCategory, …)
+  are stored as VARCHAR columns.
+end note
+
+note as NBudget
+  **daily_budget:** legacy DB column **remaining_budget** may still exist;
+  the JPA entity does **not** map it — day net is from **financial_ledger**.
+end note
+daily_budget .. NBudget
+
+@enduml

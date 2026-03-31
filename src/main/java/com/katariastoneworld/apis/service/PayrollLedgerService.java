@@ -1,18 +1,16 @@
 package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.EmployeePayrollSummaryDTO;
+import com.katariastoneworld.apis.dto.LedgerRequest;
 import com.katariastoneworld.apis.dto.PayrollAdvanceRequestDTO;
 import com.katariastoneworld.apis.dto.PayrollSalarySettlementRequestDTO;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.Employee;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry.EventType;
-import com.katariastoneworld.apis.entity.ExpenseCategory;
-import com.katariastoneworld.apis.entity.Expense;
-import com.katariastoneworld.apis.entity.ReferenceType;
+import com.katariastoneworld.apis.entity.LedgerEntryType;
 import com.katariastoneworld.apis.repository.EmployeePayrollLedgerRepository;
 import com.katariastoneworld.apis.repository.EmployeeRepository;
-import com.katariastoneworld.apis.repository.ExpenseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,10 +36,7 @@ public class PayrollLedgerService {
     private EmployeePayrollLedgerRepository ledgerRepository;
 
     @Autowired
-    private ExpenseRepository expenseRepository;
-
-    @Autowired
-    private DailyBudgetService dailyBudgetService;
+    private FinancialLedgerService financialLedgerService;
 
     public EmployeePayrollLedgerEntry recordAdvance(Long employeeId, PayrollAdvanceRequestDTO req, String location, Long actorUserId) {
         Employee emp = employeeRepository.findByIdAndLocation(employeeId, location)
@@ -64,26 +59,17 @@ public class PayrollLedgerService {
         e.setCreatedBy(actorUserId);
         EmployeePayrollLedgerEntry saved = ledgerRepository.save(e);
 
-        // Mirror into expenses for cash/budget + reporting consistency.
-        Expense ex = new Expense();
-        ex.setType("advance");
-        ex.setCategory("employee");
-        ex.setDate(d);
-        ex.setAmount(amt);
-        ex.setPaymentMethod(toLegacyExpensePaymentMethod(mode));
-        ex.setEmployeeId(emp.getId());
-        ex.setEmployeeName(emp.getEmployeeName());
-        ex.setSettled(false);
-        ex.setDescription("Employee advance: " + emp.getEmployeeName() + (req.getNotes() != null ? " - " + req.getNotes() : ""));
-        ex.setLocation(location);
-        ex.setExpenseCategory(ExpenseCategory.SALARY);
-        ex.setReferenceType(ReferenceType.PAYROLL);
-        ex.setReferenceId(String.valueOf(saved.getId()));
-        expenseRepository.save(ex);
-
-        if (LocalDate.now().equals(d)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, amt.negate());
-        }
+        financialLedgerService.createEntry(LedgerRequest.builder()
+                .location(location)
+                .sourceType("EMPLOYEE_ADVANCE")
+                .sourceId(String.valueOf(saved.getId()))
+                .entryType(LedgerEntryType.DEBIT)
+                .amount(amt)
+                .paymentMode(mode)
+                .referenceType("EMPLOYEE")
+                .referenceId(String.valueOf(emp.getId()))
+                .eventDate(d)
+                .build());
         return saved;
     }
 
@@ -144,28 +130,19 @@ public class PayrollLedgerService {
             pay.setMonth(month);
             pay.setNotes(trim(req.getNotes()));
             pay.setCreatedBy(actorUserId);
-            ledgerRepository.save(pay);
+            EmployeePayrollLedgerEntry savedPay = ledgerRepository.save(pay);
 
-            Expense ex = new Expense();
-            ex.setType("salary");
-            ex.setCategory("salary");
-            ex.setDate(d);
-            ex.setAmount(desiredCashPaid);
-            ex.setPaymentMethod(toLegacyExpensePaymentMethod(mode));
-            ex.setEmployeeId(emp.getId());
-            ex.setEmployeeName(emp.getEmployeeName());
-            ex.setMonth(month);
-            ex.setSettled(true);
-            ex.setDescription("Salary payment: " + emp.getEmployeeName() + " - " + month);
-            ex.setLocation(location);
-            ex.setExpenseCategory(ExpenseCategory.SALARY);
-            ex.setReferenceType(ReferenceType.PAYROLL);
-            ex.setReferenceId(String.valueOf(pay.getId()));
-            expenseRepository.save(ex);
-
-            if (LocalDate.now().equals(d)) {
-                dailyBudgetService.adjustRemainingForDailyExpense(location, desiredCashPaid.negate());
-            }
+            financialLedgerService.createEntry(LedgerRequest.builder()
+                    .location(location)
+                    .sourceType("SALARY")
+                    .sourceId(String.valueOf(savedPay.getId()))
+                    .entryType(LedgerEntryType.DEBIT)
+                    .amount(desiredCashPaid)
+                    .paymentMode(mode)
+                    .referenceType("EMPLOYEE")
+                    .referenceId(String.valueOf(emp.getId()))
+                    .eventDate(d)
+                    .build());
         }
 
         return buildSummary(emp, location, month);
@@ -275,15 +252,5 @@ public class PayrollLedgerService {
         return BillPaymentMode.parseFlexible(r);
     }
 
-    private static String toLegacyExpensePaymentMethod(BillPaymentMode mode) {
-        if (mode == null) return "cash";
-        return switch (mode) {
-            case CASH -> "cash";
-            case UPI -> "upi";
-            case BANK_TRANSFER -> "bank";
-            case CHEQUE -> "cheque";
-            case OTHER -> "other";
-        };
-    }
 }
 

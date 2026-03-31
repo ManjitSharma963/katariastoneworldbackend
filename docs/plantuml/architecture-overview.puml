@@ -1,0 +1,42 @@
+@startuml architecture-overview
+skinparam shadowing false
+skinparam componentStyle rectangle
+title Kataria Stone World — high-level architecture
+
+actor User as user
+node "Browser" {
+  [Inventory SPA\n(React)] as spa
+}
+
+cloud "Backend" {
+  frame "Spring Boot API" {
+    [REST Controllers] as ctrl
+    [Domain Services] as svc
+    [FinancialLedgerService\n(single money writer)] as ledgerw
+    [JPA / Repositories] as repo
+  }
+}
+
+database "MySQL" as db
+
+user --> spa : HTTPS
+spa --> ctrl : JSON + JWT\n(/api/...)
+ctrl --> svc
+svc --> ledgerw : money events
+svc --> repo
+repo --> db
+
+note right of ledgerw
+  **Source of truth for cash flow**
+  CREDIT / DEBIT rows; **is_deleted** for voids.
+  Bill payments, expenses, advances, payroll, client IN/OUT
+  all converge here for reports & dashboard.
+end note
+
+note bottom of db
+  Operational tables: bills, bill_payments, expenses, …
+  **financial_ledger** aggregates money for reporting;
+  bill header totals are **not** used as collection totals.
+end note
+
+@enduml

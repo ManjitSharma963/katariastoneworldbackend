@@ -1,5 +1,7 @@
 package com.katariastoneworld.apis.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -15,7 +17,12 @@ public class DailyBudgetSummaryDTO {
     private Long id;
     private String location;
     private BigDecimal amount;
-    private BigDecimal remainingBudget;
+    /**
+     * Ledger net for today at this location (CREDIT − DEBIT). Not read from {@code daily_budget.remaining_budget}.
+     */
+    @JsonProperty("netLedgerBalance")
+    @JsonAlias({ "remainingBudget", "remaining_budget" })
+    private BigDecimal netLedgerBalance;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
