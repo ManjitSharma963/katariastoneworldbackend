@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS financial_ledger (
     bill_kind VARCHAR(16) NULL,
     bill_id BIGINT NULL,
     customer_id BIGINT NULL,
+    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
     payment_mode VARCHAR(32) NOT NULL,
     amount DECIMAL(14,2) NOT NULL,
     in_hand_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,

@@ -138,6 +138,7 @@ public class DailyClosingReportService {
                 .map(e -> DailyClosingExpenseLineDTO.builder()
                         .id(e.getId())
                         .expenseType(e.getType())
+                        .date(e.getDate())
                         .category(e.getCategory())
                         .amount(e.getAmount() != null ? e.getAmount().doubleValue() : 0.0)
                         .description(e.getDescription())

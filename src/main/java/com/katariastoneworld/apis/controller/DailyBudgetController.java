@@ -4,6 +4,7 @@ import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.DailyBudgetRequestDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
+import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
 import com.katariastoneworld.apis.service.DailyBudgetService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -94,5 +95,19 @@ public class DailyBudgetController {
         String location = RequestUtil.getLocationFromRequest(request);
         boolean deleted = dailyBudgetService.deleteBudget(location);
         return deleted ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
+
+    @Operation(summary = "Daily budget event history",
+            description = "Returns opening/closing balances for daily budget for the authenticated user's location. Each event is recorded when the daily budget is set/changed or when daily budget remaining is adjusted due to today's expenses/roll-over.")
+    @ApiResponse(responseCode = "200", description = "Success", content = @Content(schema = @Schema(implementation = DailyBudgetEventDTO.class)))
+    @GetMapping("/history")
+    public ResponseEntity<List<DailyBudgetEventDTO>> getBudgetEvents(
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false, defaultValue = "50") Integer limit,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        int lim = limit != null ? Math.max(1, Math.min(500, limit)) : 50;
+        return ResponseEntity.ok(dailyBudgetService.getBudgetEvents(location, from, to, lim));
     }
 }

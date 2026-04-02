@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -14,6 +16,7 @@ public class DailyClosingExpenseLineDTO {
     private Long id;
     /** Expense {@code type} (e.g. daily, salary). */
     private String expenseType;
+    private LocalDate date;
     private String category;
     private Double amount;
     private String description;
