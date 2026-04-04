@@ -97,16 +97,25 @@ public class BillController {
         }
     }
 
-    @Operation(summary = "Get all bills", description = "Get all bills for the authenticated user's location. Optional query param createdBy=userId to get only bills created by that user. Requires admin role.")
+    @Operation(summary = "Get all bills", description = """
+            Get bills for the authenticated user's location.
+            **Admin:** all location bills by default; optional `createdBy=userId` filters by creator.
+            **User (non-admin):** only bills created by that user (same as `createdBy` = own id); query param ignored for other users.
+            """)
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping
-    @RequiresRole("admin")
+    @RequiresRole({ "user", "admin" })
     public ResponseEntity<List<BillResponseDTO>> getAllBills(
             @RequestParam(required = false) Long createdBy,
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
-        // By default show all bills for this location (admin + workers). Use ?createdBy=userId to filter by who created.
-        List<BillResponseDTO> bills = billService.getAllBills(location, createdBy);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        String role = RequestUtil.getRoleFromRequest(request);
+        Long effectiveCreatedBy = createdBy;
+        if (role != null && role.equalsIgnoreCase("user")) {
+            effectiveCreatedBy = userId;
+        }
+        List<BillResponseDTO> bills = billService.getAllBills(location, effectiveCreatedBy);
         return ResponseEntity.ok(bills);
     }
 
@@ -114,9 +123,14 @@ public class BillController {
     @ApiResponse(responseCode = "200", description = "Success", content = @Content(schema = @Schema(implementation = BillResponseDTO.class)))
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping("/sales")
-    @RequiresRole("admin")
+    @RequiresRole({ "user", "admin" })
     public ResponseEntity<List<BillResponseDTO>> getAllSales(HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
+        String role = RequestUtil.getRoleFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        if (role != null && role.equalsIgnoreCase("user")) {
+            return ResponseEntity.ok(billService.getAllBills(location, userId));
+        }
         List<BillResponseDTO> sales = billService.getAllSales(location);
         return ResponseEntity.ok(sales);
     }
