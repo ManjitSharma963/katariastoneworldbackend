@@ -35,6 +35,10 @@ public class DailyBudget {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
+    /** In-hand / remaining for the current day (rollover, expenses, cash/UPI). */
+    @Column(name = "remaining_budget", precision = 12, scale = 2)
+    private BigDecimal remainingBudget;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
