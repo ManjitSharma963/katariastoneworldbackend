@@ -21,7 +21,7 @@ public class DailyBudgetSummaryDTO {
     @JsonProperty("remainingBudget")
     private BigDecimal remainingBudget;
 
-    /** Ledger net for today at this location (CREDIT − DEBIT). */
+    /** Ledger net (CREDIT − DEBIT) for the calendar day of {@code updatedAt} / {@code createdAt} on this row. */
     @JsonProperty("netLedgerBalance")
     private BigDecimal netLedgerBalance;
     private LocalDateTime createdAt;

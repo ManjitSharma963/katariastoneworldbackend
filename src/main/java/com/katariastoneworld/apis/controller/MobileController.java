@@ -12,7 +12,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,8 +31,11 @@ import java.time.LocalDate;
 @Tag(name = "Mobile", description = "Compact APIs for PWA / mobile clients")
 public class MobileController {
 
-    @Autowired
-    private MobileDashboardService mobileDashboardService;
+    private final MobileDashboardService mobileDashboardService;
+
+    public MobileController(MobileDashboardService mobileDashboardService) {
+        this.mobileDashboardService = mobileDashboardService;
+    }
 
     @Operation(summary = "Today’s ledger dashboard",
             description = """

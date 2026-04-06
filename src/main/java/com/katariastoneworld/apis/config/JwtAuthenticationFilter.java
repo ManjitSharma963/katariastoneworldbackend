@@ -1,90 +1,93 @@
 package com.katariastoneworld.apis.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.katariastoneworld.apis.service.JwtUtil;
 import com.katariastoneworld.apis.util.LedgerAuditContext;
+import com.katariastoneworld.apis.web.RequestIdFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
-@Order(2) // Run after CORS filter (order 1)
+@Order(2)
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-    
-    @Autowired
-    private JwtUtil jwtUtil;
-    
-    // Public endpoints that don't require authentication
+
+    private final JwtUtil jwtUtil;
+    private final ObjectMapper objectMapper;
+
     private static final List<String> PUBLIC_ENDPOINTS = Arrays.asList(
-        "/api/auth/register",
-        "/api/auth/login",
-        "/api/auth/me",
-        "/auth/register",
-        "/auth/login",
-        "/auth/me",
-        // Inventory requires auth so products are filtered by user's location (JWT)
-        "/api/website-products",
-        "/website-products",
-        "/api/heroes",
-        "/heroes",
-        "/api/categories",
-        "/categories",
-        // Swagger UI endpoints - publicly accessible
-        "/swagger-ui.html",
-        "/swagger-ui",
-        "/swagger-ui/",
-        "/swagger-ui/index.html",
-        "/api-docs",
-        "/v3/api-docs",
-        "/v3/api-docs/swagger-config"
+            "/api/auth/register",
+            "/api/auth/login",
+            "/api/auth/me",
+            "/auth/register",
+            "/auth/login",
+            "/auth/me",
+            "/api/website-products",
+            "/website-products",
+            "/api/heroes",
+            "/heroes",
+            "/api/categories",
+            "/categories",
+            "/swagger-ui.html",
+            "/swagger-ui",
+            "/swagger-ui/",
+            "/swagger-ui/index.html",
+            "/api-docs",
+            "/v3/api-docs",
+            "/v3/api-docs/swagger-config",
+            "/actuator/health",
+            "/actuator/health/liveness",
+            "/actuator/health/readiness",
+            "/actuator/info",
+            "/actuator/prometheus"
     );
-    
+
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, ObjectMapper objectMapper) {
+        this.jwtUtil = jwtUtil;
+        this.objectMapper = objectMapper;
+    }
+
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) 
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        
+
         String requestPath = request.getRequestURI();
         String method = request.getMethod();
-        
-        // Always allow OPTIONS requests (CORS preflight) - they don't need authentication
+
         if ("OPTIONS".equalsIgnoreCase(method)) {
             filterChain.doFilter(request, response);
             return;
         }
-        
-        // Skip authentication for public endpoints (only GET requests for inventory/heroes/categories)
+
         if (isPublicEndpoint(requestPath, method)) {
             filterChain.doFilter(request, response);
             return;
         }
-        
-        // Extract token from Authorization header
+
         String token = extractTokenFromRequest(request);
-        
+
         if (token == null) {
-            sendUnauthorizedResponse(response, "Missing authorization token", false);
+            sendUnauthorizedResponse(request, response, "Missing authorization token", false);
             return;
         }
-        
-        // Validate token with detailed information
+
         JwtUtil.TokenValidationResult validationResult = jwtUtil.validateTokenWithDetails(token);
-        
+
         if (!validationResult.isValid()) {
-            // Send specific response for expired tokens to trigger automatic logout
-            sendUnauthorizedResponse(response, validationResult.getMessage(), validationResult.isExpired());
+            sendUnauthorizedResponse(request, response, validationResult.getMessage(), validationResult.isExpired());
             return;
         }
-        
-        // Token is valid, continue with the request
-        // Add user info to request attributes
+
         final Long userId;
         try {
             userId = jwtUtil.extractUserId(token);
@@ -96,7 +99,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             request.setAttribute("userRole", role);
             request.setAttribute("userLocation", location);
         } catch (Exception e) {
-            sendUnauthorizedResponse(response, "Invalid token format", false);
+            sendUnauthorizedResponse(request, response, "Invalid token format", false);
             return;
         }
 
@@ -107,12 +110,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             LedgerAuditContext.clear();
         }
     }
-    
+
     private boolean isPublicEndpoint(String path, String method) {
         if (path == null) {
             return false;
         }
-        // Normalize path (remove trailing slash, handle query params)
         String pathWithoutQuery = path.split("\\?")[0];
         final String normalizedPath;
         if (pathWithoutQuery.endsWith("/") && pathWithoutQuery.length() > 1) {
@@ -120,33 +122,34 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } else {
             normalizedPath = pathWithoutQuery;
         }
-        
-        // Check if path matches public endpoints
-        boolean isPublicPath = PUBLIC_ENDPOINTS.stream()
-                .anyMatch(endpoint -> normalizedPath.equals(endpoint) || normalizedPath.startsWith(endpoint + "/"));
-        
-        // Swagger UI and API docs are always public (all methods)
-        if (normalizedPath.startsWith("/swagger-ui") || 
-            normalizedPath.startsWith("/api-docs") || 
-            normalizedPath.startsWith("/v3/api-docs")) {
+
+        if (normalizedPath.startsWith("/actuator/health")
+                || normalizedPath.startsWith("/actuator/info")
+                || normalizedPath.startsWith("/actuator/prometheus")) {
             return true;
         }
-        
-        // For website-products, heroes, categories - only GET requests are public
-        // POST/PUT/DELETE on website-products require admin (handled by controller)
-        if (isPublicPath && (normalizedPath.startsWith("/api/website-products") ||
-                             normalizedPath.startsWith("/website-products") ||
-                             normalizedPath.startsWith("/api/heroes") ||
-                             normalizedPath.startsWith("/heroes") ||
-                             normalizedPath.startsWith("/api/categories") ||
-                             normalizedPath.startsWith("/categories"))) {
+
+        boolean isPublicPath = PUBLIC_ENDPOINTS.stream()
+                .anyMatch(endpoint -> normalizedPath.equals(endpoint) || normalizedPath.startsWith(endpoint + "/"));
+
+        if (normalizedPath.startsWith("/swagger-ui")
+                || normalizedPath.startsWith("/api-docs")
+                || normalizedPath.startsWith("/v3/api-docs")) {
+            return true;
+        }
+
+        if (isPublicPath && (normalizedPath.startsWith("/api/website-products")
+                || normalizedPath.startsWith("/website-products")
+                || normalizedPath.startsWith("/api/heroes")
+                || normalizedPath.startsWith("/heroes")
+                || normalizedPath.startsWith("/api/categories")
+                || normalizedPath.startsWith("/categories"))) {
             return "GET".equalsIgnoreCase(method);
         }
-        
-        // For auth endpoints, all methods are public
+
         return isPublicPath;
     }
-    
+
     private String extractTokenFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
@@ -154,20 +157,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         return null;
     }
-    
-    private void sendUnauthorizedResponse(HttpServletResponse response, String message, boolean isExpired) throws IOException {
+
+    private void sendUnauthorizedResponse(HttpServletRequest request, HttpServletResponse response, String message,
+            boolean isExpired) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
-        
-        // Include tokenExpired flag so frontend can automatically logout
-        String jsonResponse = String.format(
-            "{\"error\":\"Unauthorized\",\"message\":\"%s\",\"tokenExpired\":%s,\"code\":\"%s\"}",
-            message,
-            isExpired,
-            isExpired ? "TOKEN_EXPIRED" : "INVALID_TOKEN"
-        );
-        response.getWriter().write(jsonResponse);
+
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("error", "Unauthorized");
+        json.put("message", message);
+        json.put("tokenExpired", isExpired);
+        json.put("code", isExpired ? "TOKEN_EXPIRED" : "INVALID_TOKEN");
+        Object rid = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
+        if (rid != null) {
+            json.put("requestId", rid.toString());
+            response.setHeader(RequestIdFilter.REQUEST_ID_HEADER, rid.toString());
+        }
+
+        response.getWriter().write(objectMapper.writeValueAsString(json));
     }
 }
-

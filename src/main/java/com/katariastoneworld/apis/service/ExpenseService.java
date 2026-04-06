@@ -29,6 +29,9 @@ public class ExpenseService {
     @Autowired
     private FinancialLedgerService financialLedgerService;
 
+    @Autowired
+    private UnifiedCashbookService unifiedCashbookService;
+
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
         String normalizedType = normalizeTypeForEmployeeCategory(requestDTO.getType(), requestDTO.getCategory());
@@ -67,6 +70,11 @@ public class ExpenseService {
         log.info("expense_create location={} id={} amount={} category={} date={}",
                 location, savedExpense.getId(), savedExpense.getAmount(), savedExpense.getCategory(), savedExpense.getDate());
         financialLedgerService.upsertExpenseLedger(savedExpense);
+        try {
+            unifiedCashbookService.syncFromExpense(savedExpense, null);
+        } catch (Exception ex) {
+            log.warn("unified_cashbook sync skipped: {}", ex.getMessage());
+        }
         return convertToResponseDTO(savedExpense);
     }
     
@@ -94,6 +102,7 @@ public class ExpenseService {
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
+        LocalDate previousDate = expense.getDate();
         
         String normalizedType = normalizeTypeForEmployeeCategory(requestDTO.getType(), requestDTO.getCategory());
         expense.setType(normalizedType);
@@ -120,6 +129,15 @@ public class ExpenseService {
         log.info("expense_update location={} id={} amount={} category={} date={}",
                 location, updatedExpense.getId(), updatedExpense.getAmount(), updatedExpense.getCategory(), updatedExpense.getDate());
         financialLedgerService.upsertExpenseLedger(updatedExpense);
+        try {
+            unifiedCashbookService.syncFromExpense(updatedExpense, null);
+            if (previousDate != null && updatedExpense.getDate() != null
+                    && !previousDate.equals(updatedExpense.getDate())) {
+                unifiedCashbookService.rebuildDay(location, previousDate);
+            }
+        } catch (Exception ex) {
+            log.warn("unified_cashbook sync skipped: {}", ex.getMessage());
+        }
         return convertToResponseDTO(updatedExpense);
     }
     
@@ -132,6 +150,11 @@ public class ExpenseService {
         log.info("expense_delete location={} id={} amount={} date={}",
                 expense.getLocation(), expense.getId(), expense.getAmount(), expense.getDate());
         financialLedgerService.softDeleteBySourceTypeAndSourceId("EXPENSE", String.valueOf(expense.getId()));
+        try {
+            unifiedCashbookService.removeSyncedExpense(expense.getId(), location, expense.getDate());
+        } catch (Exception ex) {
+            log.warn("unified_cashbook remove skipped: {}", ex.getMessage());
+        }
         expense.setIsDeleted(true);
         expenseRepository.save(expense);
     }

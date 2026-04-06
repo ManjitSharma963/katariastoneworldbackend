@@ -1,6 +1,5 @@
 package com.katariastoneworld.apis.config;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -10,16 +9,19 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
-    
-    @Autowired
-    private RoleAuthorizationFilter roleAuthorizationFilter;
-    
+
+    private final RoleAuthorizationFilter roleAuthorizationFilter;
+
     @Value("${cors.allow-all-origins:true}")
     private boolean allowAllOrigins;
     
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://68.183.93.217,https://www.katariastoneworld.com}")
     private String allowedOriginsString;
-    
+
+    public WebConfig(RoleAuthorizationFilter roleAuthorizationFilter) {
+        this.roleAuthorizationFilter = roleAuthorizationFilter;
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(roleAuthorizationFilter);

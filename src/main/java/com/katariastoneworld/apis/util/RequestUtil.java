@@ -2,6 +2,8 @@ package com.katariastoneworld.apis.util;
 
 import jakarta.servlet.http.HttpServletRequest;
 
+import java.util.Optional;
+
 public class RequestUtil {
     
     public static String getLocationFromRequest(HttpServletRequest request) {
@@ -18,6 +20,14 @@ public class RequestUtil {
             throw new RuntimeException("User ID not found in request. User must be authenticated.");
         }
         return (Long) userId;
+    }
+
+    public static Optional<Long> getUserIdFromRequestOptional(HttpServletRequest request) {
+        Object userId = request.getAttribute("userId");
+        if (userId == null) {
+            return Optional.empty();
+        }
+        return Optional.of((Long) userId);
     }
     
     public static String getRoleFromRequest(HttpServletRequest request) {

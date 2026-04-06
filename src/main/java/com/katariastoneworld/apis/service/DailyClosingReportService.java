@@ -7,8 +7,7 @@ import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
 import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.entity.*;
 import com.katariastoneworld.apis.event.BillPaymentLedgerSyncEvent;
-import com.katariastoneworld.apis.repository.BillGSTRepository;
-import com.katariastoneworld.apis.repository.BillNonGSTRepository;
+import com.katariastoneworld.apis.repository.BillRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
@@ -43,10 +42,7 @@ public class DailyClosingReportService {
     }
 
     @Autowired
-    private BillGSTRepository billGSTRepository;
-
-    @Autowired
-    private BillNonGSTRepository billNonGSTRepository;
+    private BillRepository billRepository;
 
     @Autowired
     private BillPaymentRepository billPaymentRepository;
@@ -84,36 +80,36 @@ public class DailyClosingReportService {
         }
         final String loc = location == null ? "" : location.trim();
 
-        List<BillGST> gstBills = billGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
-        List<BillNonGST> nonBills = billNonGSTRepository.findByBillLocationAndBillDateBetween(loc, from, to);
+        List<Bill> periodBills = billRepository.findByBillLocationAndBillDateBetween(loc, from, to);
+        List<Bill> gstBills = periodBills.stream().filter(b -> b.getBillKind() == BillKind.GST).toList();
+        List<Bill> nonBills = periodBills.stream().filter(b -> b.getBillKind() == BillKind.NON_GST).toList();
 
         if (backfillLegacy && from.equals(to)) {
-            gstBills.forEach(b -> backfillLegacyPaymentIfNeededGst(b, loc));
-            nonBills.forEach(b -> backfillLegacyPaymentIfNeededNon(b, loc));
+            periodBills.forEach(b -> backfillLegacyPaymentIfNeeded(b, loc));
         }
 
-        Map<Long, List<BillPayment>> gstPaysByBill = loadPaymentsByBillId(BillKind.GST, gstBills.stream().map(BillGST::getId).toList());
-        Map<Long, List<BillPayment>> nonPaysByBill = loadPaymentsByBillId(BillKind.NON_GST, nonBills.stream().map(BillNonGST::getId).toList());
+        Map<Long, List<BillPayment>> gstPaysByBill = loadPaymentsByBillId(BillKind.GST, gstBills.stream().map(Bill::getId).toList());
+        Map<Long, List<BillPayment>> nonPaysByBill = loadPaymentsByBillId(BillKind.NON_GST, nonBills.stream().map(Bill::getId).toList());
         Map<String, BigDecimal> advanceUsedByBill = loadAdvanceUsedByBill(gstBills, nonBills);
 
         List<DailyClosingBillLineDTO> lines = new ArrayList<>();
         BigDecimal totalSales = BigDecimal.ZERO;
         BigDecimal pendingOnBilledDay = BigDecimal.ZERO;
 
-        for (BillGST b : gstBills) {
+        for (Bill b : gstBills) {
             List<BillPayment> pays = gstPaysByBill.getOrDefault(b.getId(), List.of());
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
-            lines.add(toLineGst(b, pays, advanceUsed));
+            lines.add(toClosingLine(b, pays, advanceUsed));
             totalSales = totalSales.add(b.getTotalAmount());
             pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
         }
-        for (BillNonGST b : nonBills) {
+        for (Bill b : nonBills) {
             List<BillPayment> pays = nonPaysByBill.getOrDefault(b.getId(), List.of());
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.NON_GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
-            lines.add(toLineNon(b, pays, advanceUsed));
+            lines.add(toClosingLine(b, pays, advanceUsed));
             totalSales = totalSales.add(b.getTotalAmount());
             pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
@@ -242,12 +238,13 @@ public class DailyClosingReportService {
         return map;
     }
 
-    private void backfillLegacyPaymentIfNeededGst(BillGST bill, String location) {
-        List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId());
+    private void backfillLegacyPaymentIfNeeded(Bill bill, String location) {
+        BillKind kind = bill.getBillKind();
+        List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, bill.getId());
         if (!existing.isEmpty()) {
             return;
         }
-        if (bill.getPaymentStatus() != BillGST.PaymentStatus.PAID) {
+        if (bill.getPaymentStatus() != Bill.PaymentStatus.PAID) {
             return;
         }
         String pm = bill.getPaymentMethod();
@@ -261,41 +258,13 @@ public class DailyClosingReportService {
             mode = BillPaymentMode.BANK_TRANSFER;
         }
         BillPayment row = new BillPayment();
-        row.setBillKind(BillKind.GST);
+        row.setBillKind(kind);
         row.setBillId(bill.getId());
         row.setAmount(bill.getTotalAmount().setScale(2, RoundingMode.HALF_UP));
         row.setPaymentMode(mode);
         row.setPaymentDate(bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now());
         BillPayment saved = billPaymentRepository.save(row);
-        publishBillPaymentLedgerSync(location, BillKind.GST, bill.getId(), saved);
-    }
-
-    private void backfillLegacyPaymentIfNeededNon(BillNonGST bill, String location) {
-        List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, bill.getId());
-        if (!existing.isEmpty()) {
-            return;
-        }
-        if (bill.getPaymentStatus() != BillNonGST.PaymentStatus.PAID) {
-            return;
-        }
-        String pm = bill.getPaymentMethod();
-        if (pm == null || pm.isBlank() || "-".equals(pm.trim())) {
-            return;
-        }
-        BillPaymentMode mode;
-        try {
-            mode = BillPaymentMode.parseFlexible(pm);
-        } catch (IllegalArgumentException ex) {
-            mode = BillPaymentMode.BANK_TRANSFER;
-        }
-        BillPayment row = new BillPayment();
-        row.setBillKind(BillKind.NON_GST);
-        row.setBillId(bill.getId());
-        row.setAmount(bill.getTotalAmount().setScale(2, RoundingMode.HALF_UP));
-        row.setPaymentMode(mode);
-        row.setPaymentDate(bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now());
-        BillPayment saved = billPaymentRepository.save(row);
-        publishBillPaymentLedgerSync(location, BillKind.NON_GST, bill.getId(), saved);
+        publishBillPaymentLedgerSync(location, kind, bill.getId(), saved);
     }
 
     private void publishBillPaymentLedgerSync(String billLocation, BillKind kind, Long billId, BillPayment saved) {
@@ -317,10 +286,10 @@ public class DailyClosingReportService {
         return kind.name() + ":" + billId;
     }
 
-    private Map<String, BigDecimal> loadAdvanceUsedByBill(List<BillGST> gstBills, List<BillNonGST> nonBills) {
+    private Map<String, BigDecimal> loadAdvanceUsedByBill(List<Bill> gstBills, List<Bill> nonBills) {
         Map<String, BigDecimal> map = new HashMap<>();
 
-        List<Long> gstIds = gstBills.stream().map(BillGST::getId).filter(Objects::nonNull).toList();
+        List<Long> gstIds = gstBills.stream().map(Bill::getId).filter(Objects::nonNull).toList();
         if (!gstIds.isEmpty()) {
             for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.GST, gstIds)) {
                 if (u.getBillId() == null || u.getAmountUsed() == null) continue;
@@ -331,7 +300,7 @@ public class DailyClosingReportService {
             }
         }
 
-        List<Long> nonIds = nonBills.stream().map(BillNonGST::getId).filter(Objects::nonNull).toList();
+        List<Long> nonIds = nonBills.stream().map(Bill::getId).filter(Objects::nonNull).toList();
         if (!nonIds.isEmpty()) {
             for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.NON_GST, nonIds)) {
                 if (u.getBillId() == null || u.getAmountUsed() == null) continue;
@@ -344,7 +313,7 @@ public class DailyClosingReportService {
         return map;
     }
 
-    private static DailyClosingBillLineDTO toLineGst(BillGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
+    private static DailyClosingBillLineDTO toClosingLine(Bill b, List<BillPayment> pays, BigDecimal advanceUsed) {
         BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
         String statusName = b.getPaymentStatus().name();
         String pm = b.getPaymentMethod();
@@ -355,37 +324,9 @@ public class DailyClosingReportService {
             overpaidAmt = ZERO;
         }
         ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
+        String billTypeStr = b.getBillKind() == BillKind.GST ? "GST" : "NON_GST";
         return DailyClosingBillLineDTO.builder()
-                .billType("GST")
-                .billId(b.getId())
-                .billNumber(b.getBillNumber())
-                .billDate(b.getBillDate())
-                .totalAmount(total.doubleValue())
-                .paidAmount(paid.doubleValue())
-                .dueAmount(due.doubleValue())
-                .status(deriveLineStatus(total, paid))
-                .paymentModes(formatModes(pays, pm))
-                .cashAmount(scale2(buckets.cash()))
-                .upiAmount(scale2(buckets.upi()))
-                .bankTransferAmount(scale2(buckets.bank()))
-                .otherAmount(scale2(buckets.other()))
-                .overpaidAmount(scale2(overpaidAmt))
-                .build();
-    }
-
-    private static DailyClosingBillLineDTO toLineNon(BillNonGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
-        BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
-        String statusName = b.getPaymentStatus().name();
-        String pm = b.getPaymentMethod();
-        BigDecimal paid = computePaid(total, pays, advanceUsed, pm, statusName);
-        BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal overpaidAmt = paid.subtract(total).max(ZERO);
-        if (overpaidAmt.compareTo(EPS) <= 0) {
-            overpaidAmt = ZERO;
-        }
-        ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
-        return DailyClosingBillLineDTO.builder()
-                .billType("NON_GST")
+                .billType(billTypeStr)
                 .billId(b.getId())
                 .billNumber(b.getBillNumber())
                 .billDate(b.getBillDate())

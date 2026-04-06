@@ -4,14 +4,11 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.core.Ordered;
+import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 
-@Configuration
+@Component
 public class SimpleCorsFilter implements Filter {
 
     @Value("${cors.allow-all-origins:true}")
@@ -19,16 +16,6 @@ public class SimpleCorsFilter implements Filter {
 
     @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://68.183.93.217,https://www.katariastoneworld.com}")
     private String allowedOriginsString;
-
-    @Bean
-    public FilterRegistrationBean<SimpleCorsFilter> corsFilterRegistration() {
-        FilterRegistrationBean<SimpleCorsFilter> registration = new FilterRegistrationBean<>();
-        registration.setFilter(this);
-        registration.addUrlPatterns("/*");
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
-        registration.setName("simpleCorsFilter");
-        return registration;
-    }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)

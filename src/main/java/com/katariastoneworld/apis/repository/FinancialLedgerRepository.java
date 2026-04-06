@@ -61,6 +61,15 @@ public interface FinancialLedgerRepository extends JpaRepository<FinancialLedger
     BigDecimal sumBillPaymentCreditsByLocationAndDateRange(@Param("loc") String location, @Param("from") LocalDate from,
             @Param("to") LocalDate to);
 
+    /** Bill payments taken in cash or UPI for one day (matches legacy "budget goes up" behaviour). */
+    @Query("SELECT COALESCE(SUM(l.amount), 0) FROM FinancialLedgerEntry l WHERE l.isDeleted = false "
+            + "AND l.location = :loc AND l.eventDate = :d "
+            + "AND l.entryType = com.katariastoneworld.apis.entity.LedgerEntryType.CREDIT "
+            + "AND l.sourceType = 'BILL_PAYMENT' "
+            + "AND (l.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.CASH "
+            + "OR l.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.UPI)")
+    BigDecimal sumBillPaymentCreditsCashUpiByLocationAndDate(@Param("loc") String location, @Param("d") LocalDate d);
+
     List<FinancialLedgerEntry> findByLocationAndEventDateBetweenAndIsDeletedFalse(String location, LocalDate from,
             LocalDate to);
 

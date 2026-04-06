@@ -1,7 +1,7 @@
 package com.katariastoneworld.apis.entity;
 
 /**
- * Discriminator for {@link BillPayment}: GST bills use {@code bills_gst.id}, non-GST use {@code bills_non_gst.id}.
+ * Discriminator for {@link BillPayment} and {@link Bill}: matches {@code bills.bill_kind} / {@code bill_payments.bill_kind}.
  */
 public enum BillKind {
     GST,

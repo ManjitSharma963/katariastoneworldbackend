@@ -23,14 +23,9 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
      * Uses bill.location; for legacy rows with null bill.location, falls back to customer.location.
      */
     @Query("""
-            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate = :date AND (
-              (p.billKind = com.katariastoneworld.apis.entity.BillKind.GST AND EXISTS (
-                  SELECT 1 FROM BillGST b WHERE b.id = p.billId
-                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
-              OR (p.billKind = com.katariastoneworld.apis.entity.BillKind.NON_GST AND EXISTS (
-                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId
-                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
-            )
+            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate = :date AND EXISTS (
+                  SELECT 1 FROM Bill b WHERE b.id = p.billId AND b.billKind = p.billKind
+                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location)))
             """)
     List<BillPayment> findByPaymentDateAndBillLocation(@Param("location") String location, @Param("date") LocalDate date);
 
@@ -39,14 +34,9 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
      * Uses bill.location; for legacy rows with null bill.location, falls back to customer.location.
      */
     @Query("""
-            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate >= :from AND p.paymentDate <= :to AND (
-              (p.billKind = com.katariastoneworld.apis.entity.BillKind.GST AND EXISTS (
-                  SELECT 1 FROM BillGST b WHERE b.id = p.billId
-                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
-              OR (p.billKind = com.katariastoneworld.apis.entity.BillKind.NON_GST AND EXISTS (
-                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId
-                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
-            )
+            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate >= :from AND p.paymentDate <= :to AND EXISTS (
+                  SELECT 1 FROM Bill b WHERE b.id = p.billId AND b.billKind = p.billKind
+                    AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location)))
             """)
     List<BillPayment> findByPaymentDateBetweenAndBillLocation(@Param("location") String location, @Param("from") LocalDate from, @Param("to") LocalDate to);
 }

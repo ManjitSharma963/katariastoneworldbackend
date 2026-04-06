@@ -1,5 +1,7 @@
 package com.katariastoneworld.apis.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.katariastoneworld.apis.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.annotation.Order;
@@ -8,10 +10,18 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @Component
-@Order(3) // Run after JWT authentication filter
+@Order(3)
 public class RoleAuthorizationFilter implements HandlerInterceptor {
+
+    private final ObjectMapper objectMapper;
+
+    public RoleAuthorizationFilter(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
     
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -47,7 +57,7 @@ public class RoleAuthorizationFilter implements HandlerInterceptor {
         String userRole = (String) request.getAttribute("userRole");
         
         if (userRole == null) {
-            sendForbiddenResponse(response, "User role not found");
+            sendForbiddenResponse(request, response, "User role not found");
             return false;
         }
         
@@ -60,15 +70,26 @@ public class RoleAuthorizationFilter implements HandlerInterceptor {
         }
         
         // User doesn't have required role
-        sendForbiddenResponse(response, "Insufficient permissions. Required role: " + String.join(" or ", requiredRoles));
+        sendForbiddenResponse(request, response,
+                "Insufficient permissions. Required role: " + String.join(" or ", requiredRoles));
         return false;
     }
     
-    private void sendForbiddenResponse(HttpServletResponse response, String message) throws IOException {
+    private void sendForbiddenResponse(HttpServletRequest request, HttpServletResponse response, String message)
+            throws IOException {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write("{\"error\":\"Forbidden\",\"message\":\"" + message + "\"}");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", "Forbidden");
+        body.put("message", message);
+        body.put("code", "FORBIDDEN");
+        Object rid = request.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE);
+        if (rid != null) {
+            body.put("requestId", rid.toString());
+            response.setHeader(RequestIdFilter.REQUEST_ID_HEADER, rid.toString());
+        }
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }
 

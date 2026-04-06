@@ -34,12 +34,22 @@ public class DailyBudgetController {
     @Autowired
     private DailyBudgetService dailyBudgetService;
 
-    @Operation(summary = "Get all budgets", description = "Returns all rows from the daily_budget table (all locations).")
+    @Operation(summary = "Get all budgets", description = "Returns all rows from the daily_budget table (all locations). Admin / reporting.")
     @ApiResponse(responseCode = "200", description = "Success")
     @GetMapping("/all")
     @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<List<DailyBudgetSummaryDTO>> getAllBudgets() {
         return ResponseEntity.ok(dailyBudgetService.getAllBudgets());
+    }
+
+    @Operation(summary = "Budget summary for my location",
+            description = "Returns 0 or 1 row from daily_budget for the location in the JWT (same scope as GET /budget/daily).")
+    @ApiResponse(responseCode = "200", description = "Success")
+    @GetMapping("/mine")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<List<DailyBudgetSummaryDTO>> getMyBudgetSummaries(HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(dailyBudgetService.getBudgetSummariesForAuthenticatedLocation(location));
     }
 
     @Operation(summary = "Get daily budget status", description = "Returns budget amount, today's daily expenses total (spent), and remaining. Location from JWT.")

@@ -13,7 +13,6 @@ import com.katariastoneworld.apis.entity.FinancialLedgerEntry;
 import com.katariastoneworld.apis.entity.LedgerEntryType;
 import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
 import com.katariastoneworld.apis.util.LedgerAuditContext;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,8 +36,11 @@ public class FinancialLedgerService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
-    @Autowired
-    private FinancialLedgerRepository financialLedgerRepository;
+    private final FinancialLedgerRepository financialLedgerRepository;
+
+    public FinancialLedgerService(FinancialLedgerRepository financialLedgerRepository) {
+        this.financialLedgerRepository = financialLedgerRepository;
+    }
 
     /**
      * Insert or reactivate a row for ({@code source_type}, {@code source_id}). Idempotent when an active row exists.

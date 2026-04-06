@@ -4,7 +4,6 @@ import com.katariastoneworld.apis.dto.MobileDashboardDTO;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerEntryType;
 import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,8 +23,11 @@ public class MobileDashboardService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
-    @Autowired
-    private FinancialLedgerRepository financialLedgerRepository;
+    private final FinancialLedgerRepository financialLedgerRepository;
+
+    public MobileDashboardService(FinancialLedgerRepository financialLedgerRepository) {
+        this.financialLedgerRepository = financialLedgerRepository;
+    }
 
     public MobileDashboardDTO buildForDate(String location, LocalDate day) {
         final String loc = location == null ? "" : location.trim();

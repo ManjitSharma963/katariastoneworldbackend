@@ -20,7 +20,10 @@ public class DailyBudgetStatusDTO {
     /** Sum of expense rows for this location and date */
     private BigDecimal spentAmount;
 
-    /** Stored remaining_budget column, or budgetAmount minus spent when unset */
+    /**
+     * For today: {@code budgetAmount - spentAmount +} same-day {@code BILL_PAYMENT} ledger rows paid in
+     * {@code CASH} or {@code UPI} only. Other dates: {@code remaining_budget} when set, else cap minus spent.
+     */
     private BigDecimal remainingAmount;
 
     /**

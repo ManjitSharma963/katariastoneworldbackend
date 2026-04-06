@@ -12,7 +12,6 @@ import com.katariastoneworld.apis.repository.DailyBudgetEventRepository;
 import com.katariastoneworld.apis.repository.DailyBudgetRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -22,42 +21,67 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
 public class DailyBudgetService {
 
-    @Autowired
-    private DailyBudgetRepository dailyBudgetRepository;
+    private final DailyBudgetRepository dailyBudgetRepository;
+    private final FinancialLedgerRepository financialLedgerRepository;
+    private final DailyBudgetEventRepository dailyBudgetEventRepository;
+    private final ExpenseRepository expenseRepository;
 
-    @Autowired
-    private FinancialLedgerRepository financialLedgerRepository;
+    public DailyBudgetService(DailyBudgetRepository dailyBudgetRepository,
+            FinancialLedgerRepository financialLedgerRepository,
+            DailyBudgetEventRepository dailyBudgetEventRepository,
+            ExpenseRepository expenseRepository) {
+        this.dailyBudgetRepository = dailyBudgetRepository;
+        this.financialLedgerRepository = financialLedgerRepository;
+        this.dailyBudgetEventRepository = dailyBudgetEventRepository;
+        this.expenseRepository = expenseRepository;
+    }
 
-    @Autowired
-    private DailyBudgetEventRepository dailyBudgetEventRepository;
-
-    @Autowired
-    private ExpenseRepository expenseRepository;
-
+    /**
+     * All {@code daily_budget} rows (every branch). Intended for admin / reporting only.
+     */
     public List<DailyBudgetSummaryDTO> getAllBudgets() {
         return dailyBudgetRepository.findAll().stream()
-                .map(b -> {
-                    DailyBudgetSummaryDTO dto = new DailyBudgetSummaryDTO();
-                    dto.setId(b.getId());
-                    dto.setLocation(b.getLocation());
-                    dto.setAmount(b.getAmount());
-                    dto.setRemainingBudget(b.getRemainingBudget());
-                    LocalDate today = LocalDate.now();
-                    dto.setNetLedgerBalance(netLedgerForDate(b.getLocation(), today));
-                    dto.setCreatedAt(b.getCreatedAt());
-                    dto.setUpdatedAt(b.getUpdatedAt());
-                    return dto;
-                })
+                .map(this::toSummaryDto)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * At most one summary row for the JWT location (same lookup as {@link #getBudgetStatus(String)}).
+     */
+    public List<DailyBudgetSummaryDTO> getBudgetSummariesForAuthenticatedLocation(String location) {
+        final String loc = location == null ? null : location.trim();
+        if (loc == null || loc.isBlank()) {
+            return Collections.emptyList();
+        }
+        Optional<DailyBudget> row = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                .or(() -> dailyBudgetRepository.findByLocation(loc));
+        return row.map(this::toSummaryDto)
+                .map(Collections::singletonList)
+                .orElse(Collections.emptyList());
+    }
+
+    private DailyBudgetSummaryDTO toSummaryDto(DailyBudget b) {
+        DailyBudgetSummaryDTO dto = new DailyBudgetSummaryDTO();
+        dto.setId(b.getId());
+        dto.setLocation(b.getLocation());
+        dto.setAmount(b.getAmount());
+        dto.setRemainingBudget(b.getRemainingBudget());
+        LocalDate ledgerDay = localDateOf(b.getUpdatedAt(), b.getCreatedAt());
+        dto.setNetLedgerBalance(netLedgerForDate(b.getLocation(), ledgerDay));
+        dto.setCreatedAt(b.getCreatedAt());
+        dto.setUpdatedAt(b.getUpdatedAt());
+        return dto;
     }
 
     public DailyBudgetStatusDTO getBudgetStatus(String location) {
@@ -65,9 +89,10 @@ public class DailyBudgetService {
     }
 
     /**
-     * Expense-based: {@code spentAmount} = sum expenses for the date; {@code remainingAmount} from
-     * {@code remaining_budget} when set (after rollover rules for today), else {@code budgetAmount - spentAmount}.
-     * Ledger-based (same date): {@code ledgerCreditTotal}, {@code ledgerDebitTotal}, {@code ledgerNetAmount}.
+     * Expense-based: {@code spentAmount} = sum expenses for the date. For today,
+     * {@code remainingAmount} = {@code budgetAmount - spentAmount +} same-day bill payments in
+     * CASH or UPI only (ledger {@code BILL_PAYMENT}). Other dates: {@code remaining_budget}
+     * when set, else cap minus spent. Ledger totals still include all modes.
      */
     public DailyBudgetStatusDTO getBudgetStatus(String location, LocalDate date) {
         final String loc = location == null ? null : location.trim();
@@ -100,25 +125,28 @@ public class DailyBudgetService {
                 if (yesterdayRemaining == null) {
                     yesterdayRemaining = BigDecimal.ZERO;
                 }
-                budget.setAmount(yesterdayRemaining);
-                budget.setRemainingBudget(yesterdayRemaining.subtract(expenseSpent));
+                yesterdayRemaining = yesterdayRemaining.setScale(2, RoundingMode.HALF_UP);
+                /*
+                 * amount is @PositiveOrZero — if yesterday ended over budget (negative remaining),
+                 * carry forward opening cap as 0, not a negative (avoids ConstraintViolation on save).
+                 */
+                BigDecimal rolledOpening = yesterdayRemaining.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                budget.setAmount(rolledOpening);
+                BigDecimal closing = rolledOpening.subtract(expenseSpent).setScale(2, RoundingMode.HALF_UP);
+                budget.setRemainingBudget(closing);
                 dailyBudgetRepository.save(budget);
 
-                BigDecimal opening = yesterdayRemaining;
-                BigDecimal closing = budget.getRemainingBudget() != null
-                        ? budget.getRemainingBudget()
-                        : BigDecimal.ZERO;
                 recordDailyBudgetEvent(
                         loc,
                         LocalDate.now(),
-                        opening,
+                        rolledOpening,
                         closing,
-                        closing.subtract(opening),
+                        closing.subtract(rolledOpening),
                         "ROLL_OVER"
                 );
 
-                budgetAmount = yesterdayRemaining;
-                storedRemaining = budget.getRemainingBudget();
+                budgetAmount = rolledOpening;
+                storedRemaining = closing;
             }
         }
 
@@ -126,9 +154,21 @@ public class DailyBudgetService {
         BigDecimal debits = ledgerDebitsForDate(loc, d);
         BigDecimal ledgerNet = credits.subtract(debits).setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal remaining = storedRemaining != null
-                ? storedRemaining.setScale(2, RoundingMode.HALF_UP)
-                : budgetAmount.subtract(expenseSpent).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal cashUpiBillCredits = billPaymentCashUpiCreditsForDate(loc, d);
+
+        /*
+         * For today: remaining = saved daily cap (after rollover) − today's expenses + today's bill payments
+         * in CASH/UPI only (legacy/main behaviour). Bank/cheque bill payments stay in the ledger but do not
+         * increase this daily budget figure.
+         */
+        BigDecimal remaining;
+        if (isToday) {
+            remaining = budgetAmount.subtract(expenseSpent).add(cashUpiBillCredits).setScale(2, RoundingMode.HALF_UP);
+        } else if (storedRemaining != null) {
+            remaining = storedRemaining.setScale(2, RoundingMode.HALF_UP);
+        } else {
+            remaining = budgetAmount.subtract(expenseSpent).setScale(2, RoundingMode.HALF_UP);
+        }
 
         DailyBudgetStatusDTO dto = new DailyBudgetStatusDTO();
         dto.setBudgetAmount(budgetAmount.setScale(2, RoundingMode.HALF_UP));
@@ -160,6 +200,18 @@ public class DailyBudgetService {
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
+    private BigDecimal billPaymentCashUpiCreditsForDate(String location, LocalDate date) {
+        if (location == null || location.isBlank() || date == null) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal raw = financialLedgerRepository.sumBillPaymentCreditsCashUpiByLocationAndDate(
+                location.trim(), date);
+        if (raw == null) {
+            raw = BigDecimal.ZERO;
+        }
+        return raw.setScale(2, RoundingMode.HALF_UP);
+    }
+
     private BigDecimal netLedgerForDate(String location, LocalDate date) {
         if (location == null || location.isBlank()) {
             return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
@@ -169,6 +221,14 @@ public class DailyBudgetService {
         BigDecimal debits = financialLedgerRepository
                 .sumAmountByLocationAndDateAndEntryType(location.trim(), date, LedgerEntryType.DEBIT);
         return credits.subtract(debits).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static LocalDate localDateOf(LocalDateTime updatedAt, LocalDateTime createdAt) {
+        LocalDateTime ts = updatedAt != null ? updatedAt : createdAt;
+        if (ts == null) {
+            return LocalDate.now();
+        }
+        return ts.atZone(ZoneId.systemDefault()).toLocalDate();
     }
 
     public DailyBudgetStatusDTO setBudget(String location, DailyBudgetRequestDTO requestDTO) {
@@ -359,9 +419,9 @@ public class DailyBudgetService {
             BigDecimal amt = budget.getAmount() != null ? budget.getAmount() : BigDecimal.ZERO;
             BigDecimal rem = budget.getRemainingBudget() != null ? budget.getRemainingBudget() : amt;
             openingBalance = rem != null ? rem : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-            budget.setAmount(amt.add(add));
-            budget.setRemainingBudget(openingBalance.add(add));
-            closingBalance = openingBalance.add(add);
+            budget.setAmount(amt.add(add).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
+            budget.setRemainingBudget(openingBalance.add(add).setScale(2, RoundingMode.HALF_UP));
+            closingBalance = openingBalance.add(add).setScale(2, RoundingMode.HALF_UP);
         }
         dailyBudgetRepository.save(budget);
 
@@ -412,9 +472,9 @@ public class DailyBudgetService {
         BigDecimal amt = budget.getAmount() != null ? budget.getAmount() : BigDecimal.ZERO;
         BigDecimal rem = budget.getRemainingBudget() != null ? budget.getRemainingBudget() : amt;
         openingBalance = rem != null ? rem : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-        budget.setAmount(amt.add(add));
-        budget.setRemainingBudget(openingBalance.add(add));
-        closingBalance = openingBalance.add(add);
+        budget.setAmount(amt.add(add).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
+        budget.setRemainingBudget(openingBalance.add(add).setScale(2, RoundingMode.HALF_UP));
+        closingBalance = openingBalance.add(add).setScale(2, RoundingMode.HALF_UP);
         dailyBudgetRepository.save(budget);
 
         if (closingBalance.compareTo(openingBalance) != 0) {
