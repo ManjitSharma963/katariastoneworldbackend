@@ -111,6 +111,28 @@ public class CustomerAdvanceService {
                 .setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * Reverse advance usages linked to a bill (used when a bill is deleted/cancelled).
+     * Restores each advance's remaining amount and removes usage rows.
+     */
+    public void reverseAdvanceUsageForBill(BillKind billKind, Long billId) {
+        List<CustomerAdvanceUsage> usages = customerAdvanceUsageRepository.findByBillKindAndBillId(billKind, billId);
+        if (usages == null || usages.isEmpty()) {
+            return;
+        }
+        for (CustomerAdvanceUsage usage : usages) {
+            CustomerAdvance adv = usage.getAdvance();
+            if (adv == null) {
+                continue;
+            }
+            BigDecimal rem = adv.getRemainingAmount() != null ? adv.getRemainingAmount().setScale(2, RoundingMode.HALF_UP) : ZERO;
+            BigDecimal used = usage.getAmountUsed() != null ? usage.getAmountUsed().setScale(2, RoundingMode.HALF_UP) : ZERO;
+            adv.setRemainingAmount(rem.add(used).setScale(2, RoundingMode.HALF_UP));
+            customerAdvanceRepository.save(adv);
+        }
+        customerAdvanceUsageRepository.deleteAll(usages);
+    }
+
     public Map<String, BigDecimal> sumAdvanceUsedGrouped(Collection<Long> gstBillIds, Collection<Long> nonGstBillIds) {
         Map<String, BigDecimal> map = new HashMap<>();
         if (gstBillIds != null && !gstBillIds.isEmpty()) {

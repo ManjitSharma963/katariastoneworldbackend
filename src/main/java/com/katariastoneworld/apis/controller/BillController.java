@@ -291,6 +291,29 @@ public class BillController {
         return ResponseEntity.ok(response);
     }
 
+    @DeleteMapping("/{billType}/{id}")
+    @RequiresRole({ "user", "admin" })
+    public ResponseEntity<Void> deleteBillByTypeAndId(
+            @PathVariable String billType,
+            @PathVariable Long id,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        billService.deleteBill(id, billType, location, userId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/{id}")
+    @RequiresRole({ "user", "admin" })
+    public ResponseEntity<Void> deleteBillById(
+            @PathVariable Long id,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        Long userId = RequestUtil.getUserIdFromRequest(request);
+        billService.deleteBillById(id, location, userId);
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * Helper method to generate PDF bytes based on bill type
      */

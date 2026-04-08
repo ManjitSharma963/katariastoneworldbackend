@@ -5,7 +5,10 @@ import com.katariastoneworld.apis.dto.DailyBudgetRequestDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
+import com.katariastoneworld.apis.dto.DailyBudgetCalculatedSummaryDTO;
+import com.katariastoneworld.apis.dto.InHandReconciliationDTO;
 import com.katariastoneworld.apis.service.DailyBudgetService;
+import com.katariastoneworld.apis.service.InHandReconciliationService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -33,6 +36,9 @@ public class DailyBudgetController {
 
     @Autowired
     private DailyBudgetService dailyBudgetService;
+
+    @Autowired
+    private InHandReconciliationService inHandReconciliationService;
 
     @Operation(summary = "Get all budgets", description = "Returns all rows from the daily_budget table (all locations).")
     @ApiResponse(responseCode = "200", description = "Success")
@@ -62,6 +68,19 @@ public class DailyBudgetController {
         String location = RequestUtil.getLocationFromRequest(request);
         DailyBudgetStatusDTO status = dailyBudgetService.getBudgetStatus(location, date);
         return ResponseEntity.ok(status);
+    }
+
+    @Operation(summary = "Calculated summary for date range",
+            description = "Remaining balance (as-of min(to, today)) and sum of EXPENSE_DEBIT/EXPENSE_CREDIT from daily_budget_events in [from, to]. "
+                    + "Computed on the server; avoids client-side replay of capped history lists.")
+    @GetMapping("/summary")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<DailyBudgetCalculatedSummaryDTO> getCalculatedSummary(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(dailyBudgetService.getCalculatedSummary(location, from, to));
     }
 
     @Operation(summary = "Set daily budget", description = "Set or update the daily budget amount for your location. Daily expenses (type=daily) are deducted from this for each day.")
@@ -109,5 +128,18 @@ public class DailyBudgetController {
         String location = RequestUtil.getLocationFromRequest(request);
         int lim = limit != null ? Math.max(1, Math.min(500, limit)) : 50;
         return ResponseEntity.ok(dailyBudgetService.getBudgetEvents(location, from, to, lim));
+    }
+
+    @Operation(summary = "Reconcile CASH/UPI bill payments vs ledger in-hand",
+            description = "Compares totals from bill_payments (CASH+UPI, active bills) to financial_ledger BILL_PAYMENT in_hand for the same location and date range. "
+                    + "daily_budget_events are append-only: a deleted bill adds a reversing event; older collection rows remain for audit.")
+    @GetMapping("/reconcile-in-hand")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<InHandReconciliationDTO> reconcileInHand(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(inHandReconciliationService.reconcileInHandBillPayments(location, from, to));
     }
 }

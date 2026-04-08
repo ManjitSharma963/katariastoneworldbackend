@@ -31,4 +31,11 @@ public interface FinancialLedgerRepository extends JpaRepository<FinancialLedger
             @Param("to") LocalDate to, @Param("mode") BillPaymentMode mode);
 
     List<FinancialLedgerEntry> findByLocationAndEventDateBetween(String location, LocalDate from, LocalDate to);
+
+    /** In-hand portion of bill payments still present in ledger (deleted bill payments remove their row). */
+    @Query("SELECT COALESCE(SUM(l.inHandAmount), 0) FROM FinancialLedgerEntry l WHERE l.location = :loc "
+            + "AND l.eventType = :eventType "
+            + "AND l.eventDate >= :from AND l.eventDate <= :to")
+    BigDecimal sumInHandBillPaymentsByLocationAndDateRange(@Param("loc") String location, @Param("from") LocalDate from,
+            @Param("to") LocalDate to, @Param("eventType") FinancialLedgerEntry.EventType eventType);
 }

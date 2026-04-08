@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
@@ -49,4 +50,36 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
             )
             """)
     List<BillPayment> findByPaymentDateBetweenAndBillLocation(@Param("location") String location, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** CASH+UPI on active GST bills for location (excludes soft-deleted bills and payments). */
+    @Query("""
+            SELECT COALESCE(SUM(p.amount), 0) FROM BillPayment p
+            WHERE p.isDeleted = false
+            AND (p.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.CASH
+                 OR p.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.UPI)
+            AND p.billKind = com.katariastoneworld.apis.entity.BillKind.GST
+            AND p.paymentDate >= :from AND p.paymentDate <= :to
+            AND EXISTS (
+              SELECT 1 FROM BillGST b WHERE b.id = p.billId AND b.isDeleted = false
+              AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))
+            )
+            """)
+    BigDecimal sumCashUpiGstForLocationAndPaymentDateRange(@Param("location") String location,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** CASH+UPI on active Non-GST bills for location (excludes soft-deleted bills and payments). */
+    @Query("""
+            SELECT COALESCE(SUM(p.amount), 0) FROM BillPayment p
+            WHERE p.isDeleted = false
+            AND (p.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.CASH
+                 OR p.paymentMode = com.katariastoneworld.apis.entity.BillPaymentMode.UPI)
+            AND p.billKind = com.katariastoneworld.apis.entity.BillKind.NON_GST
+            AND p.paymentDate >= :from AND p.paymentDate <= :to
+            AND EXISTS (
+              SELECT 1 FROM BillNonGST b WHERE b.id = p.billId AND b.isDeleted = false
+              AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))
+            )
+            """)
+    BigDecimal sumCashUpiNonGstForLocationAndPaymentDateRange(@Param("location") String location,
+            @Param("from") LocalDate from, @Param("to") LocalDate to);
 }

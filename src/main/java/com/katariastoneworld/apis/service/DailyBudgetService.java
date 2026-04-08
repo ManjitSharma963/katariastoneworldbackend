@@ -3,6 +3,7 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.DailyBudgetRequestDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
+import com.katariastoneworld.apis.dto.DailyBudgetCalculatedSummaryDTO;
 import com.katariastoneworld.apis.entity.DailyBudget;
 import com.katariastoneworld.apis.entity.DailyBudgetEvent;
 import com.katariastoneworld.apis.entity.Expense;
@@ -220,6 +221,70 @@ public class DailyBudgetService {
                     eventType
             );
         });
+    }
+
+    /**
+     * Server-side figures for a date range: remaining as-of (today or last event on a past day) and
+     * sum of expense ledger events in range. Use this instead of replaying capped event lists in the UI.
+     */
+    public DailyBudgetCalculatedSummaryDTO getCalculatedSummary(String location, LocalDate from, LocalDate to) {
+        final String loc = location == null ? null : location.trim();
+        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        LocalDate f = from != null ? from : (to != null ? to : today);
+        LocalDate t = to != null ? to : f;
+        if (t.isBefore(f)) {
+            LocalDate swap = f;
+            f = t;
+            t = swap;
+        }
+        DailyBudgetCalculatedSummaryDTO dto = new DailyBudgetCalculatedSummaryDTO();
+        dto.setLocation(loc);
+        dto.setFrom(f);
+        dto.setTo(t);
+        if (loc == null || loc.isBlank()) {
+            dto.setRemainingAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setExpenseFromEventsInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setRemainingAsOfDate(today);
+            dto.setBudgetAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setSpentAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            return dto;
+        }
+        BigDecimal expenseSum = dailyBudgetEventRepository.sumExpenseSpentFromEvents(loc, f, t);
+        if (expenseSum == null) {
+            expenseSum = BigDecimal.ZERO;
+        }
+        if (expenseSum.compareTo(BigDecimal.ZERO) < 0) {
+            expenseSum = BigDecimal.ZERO;
+        }
+        dto.setExpenseFromEventsInRange(expenseSum.setScale(2, RoundingMode.HALF_UP));
+
+        LocalDate remainingAsOf = t.isAfter(today) ? today : t;
+        dto.setRemainingAsOfDate(remainingAsOf);
+
+        DailyBudgetStatusDTO statusForDay = getBudgetStatus(loc, remainingAsOf);
+        BigDecimal budgetAmt = statusForDay.getBudgetAmount() != null ? statusForDay.getBudgetAmount() : BigDecimal.ZERO;
+        BigDecimal spentTbl = statusForDay.getSpentAmount() != null ? statusForDay.getSpentAmount() : BigDecimal.ZERO;
+        dto.setBudgetAmount(budgetAmt.setScale(2, RoundingMode.HALF_UP));
+        dto.setSpentAmount(spentTbl.setScale(2, RoundingMode.HALF_UP));
+
+        dailyBudgetEventRepository.findFirstByLocationAndDateOrderByCreatedAtAsc(loc, remainingAsOf)
+                .map(DailyBudgetEvent::getOpeningBalance)
+                .ifPresent(o -> dto.setOpeningBalanceForDay(o.setScale(2, RoundingMode.HALF_UP)));
+
+        BigDecimal remaining;
+        if (remainingAsOf.equals(today)) {
+            remaining = statusForDay.getRemainingAmount() != null ? statusForDay.getRemainingAmount() : BigDecimal.ZERO;
+        } else {
+            remaining = dailyBudgetEventRepository
+                    .findFirstByLocationAndDateOrderByCreatedAtDesc(loc, remainingAsOf)
+                    .map(DailyBudgetEvent::getClosingBalance)
+                    .orElse(BigDecimal.ZERO);
+        }
+        if (remaining == null) {
+            remaining = BigDecimal.ZERO;
+        }
+        dto.setRemainingAmount(remaining.setScale(2, RoundingMode.HALF_UP));
+        return dto;
     }
 
     /**

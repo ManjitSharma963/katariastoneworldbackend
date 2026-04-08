@@ -499,6 +499,18 @@ public class ProductService {
         Product product = getProductEntityByName(productName);
         deductStock(product.getId(), quantityToDeduct, referenceId, notes);
     }
+
+    /**
+     * Increase stock by product name (used when reversing a deleted bill).
+     * Records an ADD history row via {@link #addStock(Long, BigDecimal, String, String)}.
+     */
+    public void addStockByName(String productName, BigDecimal quantityToAdd, String notes, String location) {
+        Product product = getProductEntityByName(productName);
+        if (location == null || !location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with name: " + productName);
+        }
+        addStock(product.getId(), quantityToAdd, notes, location);
+    }
     
     private ProductResponseDTO convertToResponseDTO(Product product) {
         ProductResponseDTO responseDTO = new ProductResponseDTO();

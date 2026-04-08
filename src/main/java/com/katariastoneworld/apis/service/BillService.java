@@ -659,6 +659,71 @@ public class BillService {
                 billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
     }
 
+    /**
+     * Soft-delete a bill and reverse its side effects (pending, partial, or fully paid):
+     * - restore inventory for all line quantities (same mapping as create-time deduction)
+     * - soft-delete every active bill payment and reverse CASH/UPI in-hand via ledger + daily budget
+     * - restore customer advance amounts applied to this bill
+     */
+    public void deleteBill(Long billId, String billType, String location, Long actorUserId) {
+        if ("GST".equalsIgnoreCase(billType)) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            if (Boolean.TRUE.equals(bill.getIsDeleted())) {
+                log.info("delete_bill_skip_already_deleted kind=GST billId={}", billId);
+                return;
+            }
+            String billLocation = resolveBillLocation(bill, bill.getCustomer());
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            revertStockForGstBill(bill, billLocation);
+            deactivateBillPayments(BillKind.GST, billId, billLocation, actorUserId);
+            customerAdvanceService.reverseAdvanceUsageForBill(BillKind.GST, billId);
+            bill.setIsDeleted(true);
+            bill.setUpdatedByUserId(actorUserId);
+            bill.setPaymentStatus(BillGST.PaymentStatus.CANCELLED);
+            bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            bill.setPaymentMethod("-");
+            billGSTRepository.save(bill);
+            return;
+        }
+
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        if (Boolean.TRUE.equals(bill.getIsDeleted())) {
+            log.info("delete_bill_skip_already_deleted kind=NON_GST billId={}", billId);
+            return;
+        }
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        revertStockForNonGstBill(bill, billLocation);
+        deactivateBillPayments(BillKind.NON_GST, billId, billLocation, actorUserId);
+        customerAdvanceService.reverseAdvanceUsageForBill(BillKind.NON_GST, billId);
+        bill.setIsDeleted(true);
+        bill.setUpdatedByUserId(actorUserId);
+        bill.setPaymentStatus(BillNonGST.PaymentStatus.CANCELLED);
+        bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        bill.setPaymentMethod("-");
+        billNonGSTRepository.save(bill);
+    }
+
+    /**
+     * Best-effort delete by id without requiring caller to know bill type.
+     * Tries GST first then NON_GST.
+     */
+    public void deleteBillById(Long billId, String location, Long actorUserId) {
+        try {
+            deleteBill(billId, "GST", location, actorUserId);
+            return;
+        } catch (RuntimeException ignored) {
+            // try non-gst
+        }
+        deleteBill(billId, "NON_GST", location, actorUserId);
+    }
+
     public BillResponseDTO getBillById(Long id, String billType, String location) {
         if ("GST".equalsIgnoreCase(billType) || "gst".equalsIgnoreCase(billType)) {
             BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(id)
@@ -1060,6 +1125,72 @@ public class BillService {
             return customer.getLocation().trim();
         }
         return null;
+    }
+
+    private void deactivateBillPayments(BillKind kind, Long billId, String location, Long actorUserId) {
+        List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, billId);
+        for (BillPayment p : rows) {
+            if (Boolean.TRUE.equals(p.getIsDeleted())) {
+                continue;
+            }
+            p.setIsDeleted(true);
+            p.setUpdatedBy(actorUserId);
+            BillPayment saved = billPaymentRepository.save(p);
+            financialLedgerService.syncBillPayment(location, kind, billId, saved.getId(), saved.getPaymentMode(),
+                    saved.getAmount(), saved.getPaymentDate(), false);
+        }
+    }
+
+    private void revertStockForGstBill(BillGST bill, String location) {
+        Map<Long, BigDecimal> byProductId = new HashMap<>();
+        Map<String, BigDecimal> byProductName = new HashMap<>();
+        if (bill.getItems() == null) {
+            return;
+        }
+        for (BillItemGST item : bill.getItems()) {
+            BigDecimal qty = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            if (item.getProduct() != null && item.getProduct().getId() != null) {
+                byProductId.merge(item.getProduct().getId(), qty, BigDecimal::add);
+            } else if (item.getProductName() != null && !item.getProductName().isBlank()) {
+                byProductName.merge(item.getProductName(), qty, BigDecimal::add);
+            }
+        }
+        String note = "Stock restored via deleted GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
+        for (Map.Entry<Long, BigDecimal> e : byProductId.entrySet()) {
+            productService.addStock(e.getKey(), e.getValue(), note, location);
+        }
+        for (Map.Entry<String, BigDecimal> e : byProductName.entrySet()) {
+            productService.addStockByName(e.getKey(), e.getValue(), note, location);
+        }
+    }
+
+    private void revertStockForNonGstBill(BillNonGST bill, String location) {
+        Map<Long, BigDecimal> byProductId = new HashMap<>();
+        Map<String, BigDecimal> byProductName = new HashMap<>();
+        if (bill.getItems() == null) {
+            return;
+        }
+        for (BillItemNonGST item : bill.getItems()) {
+            BigDecimal qty = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            if (item.getProduct() != null && item.getProduct().getId() != null) {
+                byProductId.merge(item.getProduct().getId(), qty, BigDecimal::add);
+            } else if (item.getProductName() != null && !item.getProductName().isBlank()) {
+                byProductName.merge(item.getProductName(), qty, BigDecimal::add);
+            }
+        }
+        String note = "Stock restored via deleted Non-GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
+        for (Map.Entry<Long, BigDecimal> e : byProductId.entrySet()) {
+            productService.addStock(e.getKey(), e.getValue(), note, location);
+        }
+        for (Map.Entry<String, BigDecimal> e : byProductName.entrySet()) {
+            productService.addStockByName(e.getKey(), e.getValue(), note, location);
+        }
     }
 
     private void refreshBillFinancialsGST(BillGST bill, String location) {
