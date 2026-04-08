@@ -124,6 +124,7 @@ public class DailyBudgetService {
             dailyBudgetRepository.save(budget);
             remainingAmount = computedRemaining;
         }
+        remainingAmount = alignTodayRemainingWithEventLedgerIfNeeded(loc, date, budget, remainingAmount);
         DailyBudgetStatusDTO dto = new DailyBudgetStatusDTO();
         dto.setBudgetAmount(budgetAmount);
         dto.setSpentAmount(spentAmount);
@@ -312,6 +313,41 @@ public class DailyBudgetService {
             dto.setCreatedAt(e.getCreatedAt());
             return dto;
         }).collect(Collectors.toList());
+    }
+
+    /**
+     * If {@code daily_budget.remaining_budget} reads as 0 (or there is no row) but today's latest
+     * {@code daily_budget_events} closing balance is still positive, use the event — matches Budget history UI.
+     * When a row exists, repairs {@code remaining_budget} so the card and modal stay in sync.
+     */
+    private BigDecimal alignTodayRemainingWithEventLedgerIfNeeded(
+            String loc, LocalDate date, DailyBudget budget, BigDecimal remainingAmount) {
+        if (loc == null || loc.isBlank()) {
+            return remainingAmount;
+        }
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        if (!date.equals(today)) {
+            return remainingAmount;
+        }
+        BigDecimal rem = remainingAmount != null ? remainingAmount.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        Optional<DailyBudgetEvent> opt = dailyBudgetEventRepository.findFirstByLocationAndDateOrderByCreatedAtDesc(loc, date);
+        if (opt.isEmpty() || opt.get().getClosingBalance() == null) {
+            return rem;
+        }
+        BigDecimal eventClosing = opt.get().getClosingBalance().setScale(2, RoundingMode.HALF_UP);
+        if (eventClosing.compareTo(BigDecimal.ZERO) <= 0) {
+            return rem;
+        }
+        boolean rowShowsNoCash = rem.compareTo(BigDecimal.ZERO) == 0;
+        boolean noRowButLedgerHasCash = budget == null && rem.compareTo(eventClosing) < 0;
+        if (!rowShowsNoCash && !noRowButLedgerHasCash) {
+            return rem;
+        }
+        if (budget != null) {
+            budget.setRemainingBudget(eventClosing);
+            dailyBudgetRepository.save(budget);
+        }
+        return eventClosing;
     }
 
     private void recordDailyBudgetEvent(String location,
