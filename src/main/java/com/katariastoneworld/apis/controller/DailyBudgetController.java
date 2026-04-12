@@ -7,8 +7,10 @@ import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetCalculatedSummaryDTO;
 import com.katariastoneworld.apis.dto.InHandReconciliationDTO;
+import com.katariastoneworld.apis.dto.LoanReceiptRequestDTO;
 import com.katariastoneworld.apis.service.DailyBudgetService;
 import com.katariastoneworld.apis.service.InHandReconciliationService;
+import com.katariastoneworld.apis.service.LoanLedgerService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,6 +42,9 @@ public class DailyBudgetController {
     @Autowired
     private InHandReconciliationService inHandReconciliationService;
 
+    @Autowired
+    private LoanLedgerService loanLedgerService;
+
     @Operation(summary = "Get all budgets", description = "Returns all rows from the daily_budget table (all locations).")
     @ApiResponse(responseCode = "200", description = "Success")
     @GetMapping("/all")
@@ -68,6 +73,19 @@ public class DailyBudgetController {
         String location = RequestUtil.getLocationFromRequest(request);
         DailyBudgetStatusDTO status = dailyBudgetService.getBudgetStatus(location, date);
         return ResponseEntity.ok(status);
+    }
+
+    @Operation(summary = "Record cash borrowed (loan draw)",
+            description = "Increases today's in-hand budget like a cash collection. Repayments should be entered as a daily expense "
+                    + "(category loan_repayment) so they debit the budget and appear in expenses.")
+    @PostMapping("/loan-receipt")
+    @SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<DailyBudgetStatusDTO> recordLoanReceipt(
+            @Valid @RequestBody LoanReceiptRequestDTO body,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        loanLedgerService.recordLoanReceipt(location, body);
+        return ResponseEntity.ok(dailyBudgetService.getBudgetStatus(location));
     }
 
     @Operation(summary = "Calculated summary for date range",

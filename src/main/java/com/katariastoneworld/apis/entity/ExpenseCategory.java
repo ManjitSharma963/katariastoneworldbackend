@@ -4,6 +4,8 @@ public enum ExpenseCategory {
     DAILY,
     SALARY,
     INVENTORY,
+    /** Loan / market borrowing repayments (principal or interest paid out). */
+    LOAN,
     MISC;
 
     public static ExpenseCategory parseFlexible(String raw) {
@@ -14,6 +16,8 @@ public enum ExpenseCategory {
             case "DAILY" -> DAILY;
             case "SALARY" -> SALARY;
             case "INVENTORY" -> INVENTORY;
+            case "LOAN" -> LOAN;
+            case "LOAN_REPAYMENT" -> LOAN;
             default -> MISC;
         };
     }

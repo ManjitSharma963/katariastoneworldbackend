@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.exception;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -21,7 +22,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
         Map<String, String> error = new HashMap<>();
-        error.put("error", ex.getMessage());
+        String m = ex.getMessage() != null ? ex.getMessage() : "Invalid request";
+        error.put("message", m);
+        error.put("error", m);
         putRequestId(error);
         return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
     }
@@ -69,12 +72,26 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
     
+    /**
+     * DB constraint issues (e.g. invalid enum value, duplicate key). Prefer a clear message for the client.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrity(DataIntegrityViolationException ex) {
+        Map<String, String> error = new HashMap<>();
+        Throwable root = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause() : ex;
+        String msg = root.getMessage() != null ? root.getMessage() : ex.getMessage();
+        String hint = " If this mentions ENUM or expense_category, alter column to VARCHAR, e.g. ALTER TABLE expenses MODIFY expense_category VARCHAR(32) NULL;";
+        error.put("message", (msg != null ? msg : "Database constraint violation") + hint);
+        putRequestId(error);
+        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
         Map<String, String> error = new HashMap<>();
-        error.put("error", ex.getMessage());
+        error.put("error", ex.getMessage() != null ? ex.getMessage() : "Request failed");
         putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
     }
     
     @ExceptionHandler(Exception.class)

@@ -4,8 +4,11 @@ import com.katariastoneworld.apis.dto.InventoryHistoryResponseDTO;
 import com.katariastoneworld.apis.dto.ProductChangeHistoryResponseDTO;
 import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
+import com.katariastoneworld.apis.dto.ProductStockAsOfRowDTO;
+import com.katariastoneworld.apis.dto.StockAsOfResponseDTO;
 import com.katariastoneworld.apis.entity.InventoryActionType;
 import com.katariastoneworld.apis.entity.Product;
+import com.katariastoneworld.apis.repository.InventoryHistoryRepository;
 import com.katariastoneworld.apis.repository.ProductRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -13,7 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -22,6 +30,9 @@ public class ProductService {
     
     @Autowired
     private ProductRepository productRepository;
+
+    @Autowired
+    private InventoryHistoryRepository inventoryHistoryRepository;
 
     @Autowired
     private InventoryHistoryService inventoryHistoryService;
@@ -453,6 +464,112 @@ public class ProductService {
     public List<InventoryHistoryResponseDTO> getStockHistoryForProduct(Long productId, String location) {
         requireProductForLocation(productId, location);
         return inventoryHistoryService.getHistoryForProduct(productId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryHistoryResponseDTO> getStockHistoryForLocation(
+            String location,
+            LocalDate from,
+            LocalDate to,
+            InventoryActionType actionType,
+            Integer limit) {
+        if (location == null || location.isBlank()) {
+            throw new RuntimeException("Location is required");
+        }
+        return inventoryHistoryService.getHistoryForLocation(location, from, to, actionType, limit);
+    }
+
+    /**
+     * Quantity at end of {@code rangeEnd} (and optionally {@code rangeStart}) from current stock minus summed
+     * {@code inventory_history.quantity_changed} for rows with {@code created_at} on or after the start of the day after each date.
+     */
+    @Transactional(readOnly = true)
+    public StockAsOfResponseDTO getStockAsOf(String location, LocalDate rangeEnd, LocalDate rangeStart) {
+        if (location == null || location.isBlank()) {
+            throw new IllegalArgumentException("Location is required");
+        }
+        if (rangeEnd == null) {
+            throw new IllegalArgumentException("endDate is required");
+        }
+        if (rangeStart != null && rangeStart.isAfter(rangeEnd)) {
+            throw new IllegalArgumentException("startDate cannot be after endDate");
+        }
+        String loc = location.trim();
+        LocalDateTime afterEnd = rangeEnd.plusDays(1).atStartOfDay();
+        LocalDateTime afterStart = rangeStart != null ? rangeStart.plusDays(1).atStartOfDay() : null;
+
+        Map<Long, BigDecimal> sumAfterEnd = toProductSumMap(
+                inventoryHistoryRepository.sumQuantityChangedByProductAfterInstant(loc, afterEnd));
+        Map<Long, BigDecimal> sumAfterStart = new HashMap<>();
+        if (afterStart != null) {
+            sumAfterStart.putAll(toProductSumMap(
+                    inventoryHistoryRepository.sumQuantityChangedByProductAfterInstant(loc, afterStart)));
+        }
+
+        List<Product> products = productRepository.findByLocation(loc);
+        List<ProductStockAsOfRowDTO> rows = new ArrayList<>();
+        for (Product p : products) {
+            boolean existedEnd = !p.getCreatedAt().toLocalDate().isAfter(rangeEnd);
+            boolean existedStart = rangeStart == null || !p.getCreatedAt().toLocalDate().isAfter(rangeStart);
+
+            BigDecimal current = p.getQuantity() != null ? p.getQuantity() : BigDecimal.ZERO;
+            current = current.setScale(2, RoundingMode.HALF_UP);
+
+            BigDecimal qEnd = null;
+            if (existedEnd) {
+                BigDecimal sumE = sumAfterEnd.getOrDefault(p.getId(), BigDecimal.ZERO);
+                qEnd = current.subtract(sumE).setScale(2, RoundingMode.HALF_UP);
+                if (qEnd.compareTo(BigDecimal.ZERO) < 0) {
+                    qEnd = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                }
+            }
+
+            BigDecimal qStart = null;
+            if (rangeStart != null && existedStart) {
+                BigDecimal sumS = sumAfterStart.getOrDefault(p.getId(), BigDecimal.ZERO);
+                qStart = current.subtract(sumS).setScale(2, RoundingMode.HALF_UP);
+                if (qStart.compareTo(BigDecimal.ZERO) < 0) {
+                    qStart = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                }
+            }
+
+            rows.add(new ProductStockAsOfRowDTO(p.getId(), qEnd, qStart));
+        }
+
+        String explanation =
+                "Quantities are derived from current stock minus every inventory movement logged after each selected date "
+                        + "(sales, stock adds, manual quantity updates). Products created after a date show no figure for that date. "
+                        + "If some past movements were never recorded in inventory history, older dates may be inaccurate.";
+
+        return new StockAsOfResponseDTO(rangeEnd, rangeStart, rows, explanation);
+    }
+
+    private static Map<Long, BigDecimal> toProductSumMap(List<Object[]> sumRows) {
+        Map<Long, BigDecimal> m = new HashMap<>();
+        if (sumRows == null) {
+            return m;
+        }
+        for (Object[] row : sumRows) {
+            if (row == null || row.length < 2 || row[0] == null) {
+                continue;
+            }
+            Long pid = ((Number) row[0]).longValue();
+            m.put(pid, toScaledBd(row[1]));
+        }
+        return m;
+    }
+
+    private static BigDecimal toScaledBd(Object v) {
+        if (v == null) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        if (v instanceof BigDecimal) {
+            return ((BigDecimal) v).setScale(2, RoundingMode.HALF_UP);
+        }
+        if (v instanceof Number) {
+            return BigDecimal.valueOf(((Number) v).doubleValue()).setScale(2, RoundingMode.HALF_UP);
+        }
+        return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
     }
 
     private Product requireProductForLocation(Long productId, String location) {

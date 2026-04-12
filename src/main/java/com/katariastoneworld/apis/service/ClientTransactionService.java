@@ -51,7 +51,10 @@ public class ClientTransactionService {
             ex.setDate(d);
             ex.setAmount(amt);
             ex.setPaymentMethod(toLegacyExpensePaymentMethod(mode));
-            ex.setDescription("Client transaction outflow: " + type.name() + " - " + saved.getClientId());
+            String note = req.getNotes() != null ? req.getNotes().trim() : "";
+            ex.setDescription(note.isEmpty()
+                    ? ("Client transaction outflow: " + type.name() + " - " + saved.getClientId())
+                    : note);
             ex.setExpenseCategory(ExpenseCategory.INVENTORY.name());
             ex.setReferenceType(ReferenceType.CLIENT.name());
             ex.setReferenceId(String.valueOf(saved.getId()));

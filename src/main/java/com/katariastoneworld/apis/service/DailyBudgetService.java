@@ -4,12 +4,21 @@ import com.katariastoneworld.apis.dto.DailyBudgetRequestDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetCalculatedSummaryDTO;
+import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.DailyBudget;
 import com.katariastoneworld.apis.entity.DailyBudgetEvent;
+import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry;
 import com.katariastoneworld.apis.entity.Expense;
+import com.katariastoneworld.apis.entity.FinancialLedgerEntry;
 import com.katariastoneworld.apis.repository.DailyBudgetRepository;
 import com.katariastoneworld.apis.repository.DailyBudgetEventRepository;
+import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
+import com.katariastoneworld.apis.repository.EmployeePayrollLedgerRepository;
+import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
+import com.katariastoneworld.apis.repository.LoanLedgerEntryRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +31,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -33,6 +43,8 @@ import org.springframework.data.domain.Sort;
 @Transactional
 public class DailyBudgetService {
 
+    private static final Logger log = LoggerFactory.getLogger(DailyBudgetService.class);
+
     @Autowired
     private DailyBudgetRepository dailyBudgetRepository;
 
@@ -41,6 +53,15 @@ public class DailyBudgetService {
 
     @Autowired
     private ExpenseRepository expenseRepository;
+
+    @Autowired
+    private LoanLedgerEntryRepository loanLedgerEntryRepository;
+
+    @Autowired
+    private FinancialLedgerRepository financialLedgerRepository;
+
+    @Autowired
+    private EmployeePayrollLedgerRepository employeePayrollLedgerRepository;
 
     /**
      * Get all budgets from the daily_budget table (all locations).
@@ -92,6 +113,18 @@ public class DailyBudgetService {
                 if (yesterdayRemaining == null) yesterdayRemaining = BigDecimal.ZERO;
                 budget.setAmount(yesterdayRemaining);
                 budget.setRemainingBudget(yesterdayRemaining.subtract(spentAmount));
+
+                // Bank channel: carry opening through each completed calendar day (same net rules as Expenses "Amount in bank").
+                BigDecimal bankOpen = budget.getBankOpeningBalance() != null
+                        ? budget.getBankOpeningBalance().setScale(2, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                LocalDate d = lastUpdatedDate;
+                while (d.isBefore(LocalDate.now())) {
+                    bankOpen = bankOpen.add(computeBankNetForLocationAndDateRange(loc, d, d)).setScale(2, RoundingMode.HALF_UP);
+                    d = d.plusDays(1);
+                }
+                budget.setBankOpeningBalance(bankOpen);
+
                 dailyBudgetRepository.save(budget);
 
                 // Log rollover so UI can show opening/closing balance for the new day.
@@ -248,6 +281,14 @@ public class DailyBudgetService {
             dto.setRemainingAsOfDate(today);
             dto.setBudgetAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
             dto.setSpentAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setLoanReceiptsBankChequeInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setLoanRepaymentsBankChequeInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setBankCreditsInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setBankDebitsInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setCashUpiCreditsInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setCashUpiDebitsInRange(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setBankOpeningBalanceCarriedForward(null);
+            dto.setBankBalanceIncludingOpening(null);
             return dto;
         }
         BigDecimal expenseSum = dailyBudgetEventRepository.sumExpenseSpentFromEvents(loc, f, t);
@@ -285,7 +326,144 @@ public class DailyBudgetService {
             remaining = BigDecimal.ZERO;
         }
         dto.setRemainingAmount(remaining.setScale(2, RoundingMode.HALF_UP));
+
+        BigDecimal loanRecvBc = computeBankLoanReceiptsInRange(loc, f, t);
+        dto.setLoanReceiptsBankChequeInRange(loanRecvBc.setScale(2, RoundingMode.HALF_UP));
+
+        BigDecimal loanRepayBc = loanLedgerEntryRepository.sumBankChequeModeEntriesBetween(loc, f, t, LoanLedgerEntryType.REPAYMENT);
+        if (loanRepayBc == null) {
+            loanRepayBc = BigDecimal.ZERO;
+        }
+        dto.setLoanRepaymentsBankChequeInRange(loanRepayBc.setScale(2, RoundingMode.HALF_UP));
+
+        List<BillPaymentMode> inHandModes = List.of(BillPaymentMode.CASH, BillPaymentMode.UPI);
+        List<FinancialLedgerEntry.EventType> ledgerCreditTypes = List.of(
+                FinancialLedgerEntry.EventType.CLIENT_PAYMENT_IN,
+                FinancialLedgerEntry.EventType.ADVANCE_DEPOSIT);
+        List<FinancialLedgerEntry.EventType> billPaymentTypes = List.of(FinancialLedgerEntry.EventType.BILL_PAYMENT);
+
+        BigDecimal ledgerCashUpiCredit = nullToZero(financialLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, ledgerCreditTypes, inHandModes));
+
+        /*
+         * BILL_PAYMENT rows come from customer sales invoices (GST / Non-GST): money collected from customers.
+         * They are inflows for the chosen payment mode — not supplier payables. Count as credits, not debits.
+         */
+        BigDecimal ledgerCashUpiFromCustomerBills = nullToZero(financialLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, billPaymentTypes, inHandModes));
+
+        BigDecimal expenseCashUpiOut = sumExpenseOutflowsForPaymentChannel(loc, f, t, ExpensePayChannel.CASH_UPI);
+
+        List<EmployeePayrollLedgerEntry.EventType> payrollOutflowTypes = List.of(
+                EmployeePayrollLedgerEntry.EventType.SALARY_CASH_PAID,
+                EmployeePayrollLedgerEntry.EventType.ADVANCE_GIVEN);
+        BigDecimal payrollCashUpiOut = nullToZero(employeePayrollLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, payrollOutflowTypes, inHandModes));
+
+        BigDecimal loanCashUpiRecv = nullToZero(loanLedgerEntryRepository.sumCashUpiReceiptsBetween(
+                loc, f, t, LoanLedgerEntryType.RECEIPT));
+
+        BigDecimal bankCredits = computeBankCreditsInRange(loc, f, t);
+        BigDecimal bankDebits = computeBankDebitsInRange(loc, f, t);
+        BigDecimal cashUpiCredits = loanCashUpiRecv.add(ledgerCashUpiCredit).add(ledgerCashUpiFromCustomerBills);
+        BigDecimal cashUpiDebits = expenseCashUpiOut.add(payrollCashUpiOut);
+
+        dto.setBankCreditsInRange(bankCredits.setScale(2, RoundingMode.HALF_UP));
+        dto.setBankDebitsInRange(bankDebits.setScale(2, RoundingMode.HALF_UP));
+        dto.setCashUpiCreditsInRange(cashUpiCredits.setScale(2, RoundingMode.HALF_UP));
+        dto.setCashUpiDebitsInRange(cashUpiDebits.setScale(2, RoundingMode.HALF_UP));
+
+        dto.setBankOpeningBalanceCarriedForward(null);
+        dto.setBankBalanceIncludingOpening(null);
+        if (f.equals(t) && t.equals(today)) {
+            BigDecimal bankOpening = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
+                    .or(() -> dailyBudgetRepository.findByLocation(loc))
+                    .map(b -> b.getBankOpeningBalance() != null
+                            ? b.getBankOpeningBalance().setScale(2, RoundingMode.HALF_UP)
+                            : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
+                    .orElse(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+            dto.setBankOpeningBalanceCarriedForward(bankOpening);
+            BigDecimal net = bankCredits.subtract(bankDebits).setScale(2, RoundingMode.HALF_UP);
+            dto.setBankBalanceIncludingOpening(bankOpening.add(net).setScale(2, RoundingMode.HALF_UP));
+        }
         return dto;
+    }
+
+    private BigDecimal computeBankLoanReceiptsInRange(String loc, LocalDate f, LocalDate t) {
+        BigDecimal loanRecvBc = loanLedgerEntryRepository.sumBankChequeModeEntriesBetween(loc, f, t, LoanLedgerEntryType.RECEIPT);
+        return loanRecvBc != null ? loanRecvBc : BigDecimal.ZERO;
+    }
+
+    /**
+     * Bank-channel credits: loan (bank/cheque), financial ledger client/advance in bank modes, customer bill payments in bank modes.
+     */
+    private BigDecimal computeBankCreditsInRange(String loc, LocalDate f, LocalDate t) {
+        BigDecimal loanRecvBc = computeBankLoanReceiptsInRange(loc, f, t);
+        List<BillPaymentMode> bankModes = List.of(BillPaymentMode.BANK_TRANSFER, BillPaymentMode.CHEQUE, BillPaymentMode.OTHER);
+        List<FinancialLedgerEntry.EventType> ledgerCreditTypes = List.of(
+                FinancialLedgerEntry.EventType.CLIENT_PAYMENT_IN,
+                FinancialLedgerEntry.EventType.ADVANCE_DEPOSIT);
+        List<FinancialLedgerEntry.EventType> billPaymentTypes = List.of(FinancialLedgerEntry.EventType.BILL_PAYMENT);
+        BigDecimal ledgerBankCredit = nullToZero(financialLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, ledgerCreditTypes, bankModes));
+        BigDecimal ledgerBankFromCustomerBills = nullToZero(financialLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, billPaymentTypes, bankModes));
+        return loanRecvBc.add(ledgerBankCredit).add(ledgerBankFromCustomerBills).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Bank-channel debits: expenses and payroll outflows paid bank/cheque/card. */
+    private BigDecimal computeBankDebitsInRange(String loc, LocalDate f, LocalDate t) {
+        List<BillPaymentMode> bankModes = List.of(BillPaymentMode.BANK_TRANSFER, BillPaymentMode.CHEQUE, BillPaymentMode.OTHER);
+        List<EmployeePayrollLedgerEntry.EventType> payrollOutflowTypes = List.of(
+                EmployeePayrollLedgerEntry.EventType.SALARY_CASH_PAID,
+                EmployeePayrollLedgerEntry.EventType.ADVANCE_GIVEN);
+        BigDecimal expenseBankOut = sumExpenseOutflowsForPaymentChannel(loc, f, t, ExpensePayChannel.BANK_CARD_CHEQUE);
+        BigDecimal payrollBankOut = nullToZero(employeePayrollLedgerRepository.sumAmountByLocationDateRangeTypesAndModes(
+                loc, f, t, payrollOutflowTypes, bankModes));
+        return expenseBankOut.add(payrollBankOut).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal computeBankNetForLocationAndDateRange(String loc, LocalDate f, LocalDate t) {
+        return computeBankCreditsInRange(loc, f, t).subtract(computeBankDebitsInRange(loc, f, t)).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal nullToZero(BigDecimal v) {
+        return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private enum ExpensePayChannel {
+        CASH_UPI,
+        BANK_CARD_CHEQUE
+    }
+
+    private static ExpensePayChannel classifyExpensePayment(String paymentMethod) {
+        if (paymentMethod == null || paymentMethod.isBlank()) {
+            return null;
+        }
+        String v = paymentMethod.trim().toLowerCase(Locale.ROOT).replace('-', ' ');
+        if ("cash".equals(v) || "upi".equals(v)) {
+            return ExpensePayChannel.CASH_UPI;
+        }
+        if (v.contains("bank") || "card".equals(v) || "cheque".equals(v) || "check".equals(v)) {
+            return ExpensePayChannel.BANK_CARD_CHEQUE;
+        }
+        return null;
+    }
+
+    private BigDecimal sumExpenseOutflowsForPaymentChannel(String location, LocalDate from, LocalDate to,
+            ExpensePayChannel channel) {
+        List<Expense> rows = expenseRepository.findByLocationAndDateBetween(location, from, to);
+        BigDecimal sum = BigDecimal.ZERO;
+        for (Expense e : rows) {
+            if (e.getAmount() == null) {
+                continue;
+            }
+            if (classifyExpensePayment(e.getPaymentMethod()) != channel) {
+                continue;
+            }
+            sum = sum.add(e.getAmount());
+        }
+        return sum.setScale(2, RoundingMode.HALF_UP);
     }
 
     /**
@@ -391,8 +569,29 @@ public class DailyBudgetService {
                 || inHandAmount.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
+        addInHandCashToBudget(location.trim(), inHandAmount.setScale(2, RoundingMode.HALF_UP), "IN_HAND_COLLECTION");
+    }
+
+    /**
+     * Cash borrowed (market / financier / personal loan draw). Increases today's budget amount and remaining,
+     * and records {@code LOAN_RECEIVED} in daily_budget_events (Budget history shows as a credit).
+     */
+    public void recordLoanReceipt(String location, BigDecimal amount, String lenderName, String notes) {
+        if (location == null || location.isBlank() || amount == null
+                || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
         String loc = location.trim();
-        BigDecimal add = inHandAmount.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal add = amount.setScale(2, RoundingMode.HALF_UP);
+        log.info("loan_receipt location={} amount={} lender={} notes={}",
+                loc, add, lenderName != null ? lenderName.trim() : "", notes != null ? notes.trim() : "");
+        addInHandCashToBudget(loc, add, "LOAN_RECEIVED");
+    }
+
+    /**
+     * Shared path: positive cash inflow to daily budget (sales in-hand, loan draw, etc.).
+     */
+    private void addInHandCashToBudget(String loc, BigDecimal add, String eventType) {
         DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
                 .or(() -> dailyBudgetRepository.findByLocation(loc))
                 .orElse(null);
@@ -418,14 +617,13 @@ public class DailyBudgetService {
         }
         dailyBudgetRepository.save(budget);
 
-        // Log so Budget history shows cash/upi collections as CREDIT.
         recordDailyBudgetEvent(
                 loc,
                 today,
                 openingBalance,
                 closingBalance,
                 closingBalance.subtract(openingBalance),
-                "IN_HAND_COLLECTION"
+                eventType != null ? eventType : "IN_HAND_COLLECTION"
         );
     }
 

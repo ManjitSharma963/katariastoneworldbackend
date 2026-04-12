@@ -39,6 +39,13 @@ public class DailyBudget {
     @Column(name = "remaining_budget", precision = 12, scale = 2)
     private BigDecimal remainingBudget;
 
+    /**
+     * Opening bank-channel balance at the start of the current calendar day (after rollover).
+     * Rolled forward like cash/UPI: each new day adds prior days' net bank credits − debits (same rules as the Expenses card).
+     */
+    @Column(name = "bank_opening_balance", precision = 12, scale = 2)
+    private BigDecimal bankOpeningBalance;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

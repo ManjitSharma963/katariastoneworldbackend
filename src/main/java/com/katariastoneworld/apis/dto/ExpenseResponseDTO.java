@@ -27,6 +27,8 @@ public class ExpenseResponseDTO {
     private String expenseCategory;
     private String referenceType;
     private String referenceId;
+    /** Present when this expense is a loan repayment row in loan_ledger_entries. */
+    private Long lenderId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

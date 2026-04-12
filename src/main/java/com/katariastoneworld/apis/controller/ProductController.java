@@ -6,7 +6,9 @@ import com.katariastoneworld.apis.dto.InventoryHistoryResponseDTO;
 import com.katariastoneworld.apis.dto.ProductChangeHistoryResponseDTO;
 import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
+import com.katariastoneworld.apis.dto.StockAsOfResponseDTO;
 import com.katariastoneworld.apis.dto.UpdateStockRequestDTO;
+import com.katariastoneworld.apis.entity.InventoryActionType;
 import com.katariastoneworld.apis.service.ProductService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,11 +17,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -85,6 +89,42 @@ public class ProductController {
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         return ResponseEntity.ok(productService.getStockHistoryForProduct(productId, location));
+    }
+
+    @Operation(summary = "Stock history for all products",
+            description = "Returns inventory movement rows across all products for your location, newest first. Supports optional date and action filters.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/history")
+    public ResponseEntity<List<InventoryHistoryResponseDTO>> getStockHistoryForAllProducts(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String actionType,
+            @RequestParam(required = false, defaultValue = "1000") Integer limit,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        InventoryActionType parsedActionType = null;
+        if (actionType != null && !actionType.isBlank()) {
+            try {
+                parsedActionType = InventoryActionType.valueOf(actionType.trim().toUpperCase());
+            } catch (IllegalArgumentException ex) {
+                return ResponseEntity.badRequest().build();
+            }
+        }
+        return ResponseEntity.ok(productService.getStockHistoryForLocation(location, from, to, parsedActionType, limit));
+    }
+
+    @Operation(
+            summary = "Stock as of date(s)",
+            description = "Reconstructs quantity at the end of endDate (and optionally startDate) from current stock minus inventory_history movements after those dates. "
+                    + "Products added after a date show null for that date. See `explanation` in the response.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/stock-as-of")
+    public ResponseEntity<StockAsOfResponseDTO> getStockAsOf(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(productService.getStockAsOf(location, endDate, startDate));
     }
 
     @Operation(summary = "Full product edit history", description = "Snapshots before/after each PUT update (prices, GST, stock, etc.). Newest first.")

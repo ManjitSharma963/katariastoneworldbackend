@@ -6,8 +6,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.katariastoneworld.apis.entity.BillPaymentMode;
+
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 
 public interface EmployeePayrollLedgerRepository extends JpaRepository<EmployeePayrollLedgerEntry, Long> {
@@ -34,5 +37,15 @@ public interface EmployeePayrollLedgerRepository extends JpaRepository<EmployeeP
             "WHERE e.location = :loc AND e.employeeId = :empId AND e.eventType = :type")
     BigDecimal sumAmountByEmployeeTypeAllTime(@Param("loc") String location, @Param("empId") Long employeeId,
             @Param("type") EventType type);
+
+    @Query("SELECT COALESCE(SUM(e.amount), 0) FROM EmployeePayrollLedgerEntry e WHERE LOWER(TRIM(e.location)) = LOWER(TRIM(:loc)) "
+            + "AND e.eventDate >= :from AND e.eventDate <= :to "
+            + "AND e.eventType IN :eventTypes AND e.paymentMode IN :modes")
+    BigDecimal sumAmountByLocationDateRangeTypesAndModes(
+            @Param("loc") String location,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("eventTypes") Collection<EmployeePayrollLedgerEntry.EventType> eventTypes,
+            @Param("modes") Collection<BillPaymentMode> modes);
 }
 

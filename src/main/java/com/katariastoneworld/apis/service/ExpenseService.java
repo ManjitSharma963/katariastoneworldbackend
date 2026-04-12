@@ -29,6 +29,9 @@ public class ExpenseService {
     @Autowired
     private DailyBudgetService dailyBudgetService;
 
+    @Autowired
+    private LoanLedgerService loanLedgerService;
+
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
         String normalizedType = normalizeTypeForEmployeeCategory(requestDTO.getType(), requestDTO.getCategory());
@@ -66,9 +69,12 @@ public class ExpenseService {
         Expense savedExpense = expenseRepository.save(expense);
         log.info("expense_create location={} id={} amount={} category={} date={}",
                 location, savedExpense.getId(), savedExpense.getAmount(), savedExpense.getCategory(), savedExpense.getDate());
-        if (LocalDate.now().equals(savedExpense.getDate()) && savedExpense.getAmount() != null) {
+        if (LocalDate.now().equals(savedExpense.getDate())
+                && savedExpense.getAmount() != null
+                && shouldAffectDailyInHandBudget(savedExpense)) {
             dailyBudgetService.adjustRemainingForDailyExpense(location, savedExpense.getAmount().negate());
         }
+        loanLedgerService.syncRepaymentLedger(savedExpense, requestDTO.getLenderId());
         return convertToResponseDTO(savedExpense);
     }
     
@@ -96,6 +102,14 @@ public class ExpenseService {
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
+
+        // Keep previous values for budget rollback/re-apply logic
+        BigDecimal oldAmount = expense.getAmount();
+        LocalDate oldDate = expense.getDate();
+        String oldPaymentMethod = expense.getPaymentMethod();
+        ExpenseCategory oldExpenseCategory = expense.getExpenseCategory();
+        String oldCategoryRaw = expense.getCategory();
+        String oldType = expense.getType();
         
         String normalizedType = normalizeTypeForEmployeeCategory(requestDTO.getType(), requestDTO.getCategory());
         expense.setType(normalizedType);
@@ -117,19 +131,28 @@ public class ExpenseService {
         } else if ("advance".equalsIgnoreCase(normalizedType) && expense.getSettled() == null) {
             expense.setSettled(false);
         }
-        
-        BigDecimal oldAmount = expense.getAmount();
-        LocalDate oldDate = expense.getDate();
+
+        Expense oldExpenseSnapshot = new Expense();
+        oldExpenseSnapshot.setAmount(oldAmount);
+        oldExpenseSnapshot.setDate(oldDate);
+        oldExpenseSnapshot.setPaymentMethod(oldPaymentMethod);
+        oldExpenseSnapshot.setExpenseCategory(oldExpenseCategory);
+        oldExpenseSnapshot.setCategory(oldCategoryRaw);
+        oldExpenseSnapshot.setType(oldType);
+
         Expense updatedExpense = expenseRepository.save(expense);
         log.info("expense_update location={} id={} amount={} category={} date={}",
                 location, updatedExpense.getId(), updatedExpense.getAmount(), updatedExpense.getCategory(), updatedExpense.getDate());
         LocalDate today = LocalDate.now();
-        if (today.equals(oldDate)) {
+        if (today.equals(oldDate) && shouldAffectDailyInHandBudget(oldExpenseSnapshot)) {
             dailyBudgetService.adjustRemainingForDailyExpense(location, oldAmount != null ? oldAmount : BigDecimal.ZERO);
         }
-        if (today.equals(updatedExpense.getDate()) && updatedExpense.getAmount() != null) {
+        if (today.equals(updatedExpense.getDate())
+                && updatedExpense.getAmount() != null
+                && shouldAffectDailyInHandBudget(updatedExpense)) {
             dailyBudgetService.adjustRemainingForDailyExpense(location, updatedExpense.getAmount().negate());
         }
+        loanLedgerService.syncRepaymentLedger(updatedExpense, requestDTO.getLenderId());
         return convertToResponseDTO(updatedExpense);
     }
     
@@ -139,7 +162,10 @@ public class ExpenseService {
         if (!location.equals(expense.getLocation())) {
             throw new RuntimeException("Expense not found with id: " + id);
         }
-        if (LocalDate.now().equals(expense.getDate()) && expense.getAmount() != null) {
+        loanLedgerService.deleteRepaymentByExpenseId(expense.getId());
+        if (LocalDate.now().equals(expense.getDate())
+                && expense.getAmount() != null
+                && shouldAffectDailyInHandBudget(expense)) {
             dailyBudgetService.adjustRemainingForDailyExpense(expense.getLocation(), expense.getAmount());
         }
         log.info("expense_delete location={} id={} amount={} date={}",
@@ -164,6 +190,7 @@ public class ExpenseService {
         dto.setExpenseCategory(expense.getExpenseCategory() != null ? expense.getExpenseCategory().name() : null);
         dto.setReferenceType(expense.getReferenceType() != null ? expense.getReferenceType().name() : null);
         dto.setReferenceId(expense.getReferenceId());
+        loanLedgerService.findLenderIdForExpense(expense.getId()).ifPresent(dto::setLenderId);
         dto.setCreatedAt(expense.getCreatedAt());
         dto.setUpdatedAt(expense.getUpdatedAt());
         return dto;
@@ -183,6 +210,12 @@ public class ExpenseService {
     private static ExpenseCategory resolveExpenseCategory(ExpenseRequestDTO dto, String normalizedType) {
         if (dto != null && dto.getExpenseCategory() != null && !dto.getExpenseCategory().isBlank()) {
             return ExpenseCategory.parseFlexible(dto.getExpenseCategory());
+        }
+        if (dto != null && dto.getCategory() != null) {
+            String c = dto.getCategory().trim().toLowerCase();
+            if ("loan_repayment".equals(c) || "loan_repay".equals(c) || "loan".equals(c) || "market_loan".equals(c)) {
+                return ExpenseCategory.LOAN;
+            }
         }
         String t = normalizedType == null ? "" : normalizedType.trim().toLowerCase();
         if ("salary".equals(t) || "advance".equals(t)) return ExpenseCategory.SALARY;
@@ -206,6 +239,24 @@ public class ExpenseService {
         if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * Rule: loan repayments paid by non in-hand modes (bank transfer / cheque) should not affect
+     * daily in-hand budget. All other expenses keep existing behavior.
+     */
+    private static boolean shouldAffectDailyInHandBudget(Expense e) {
+        if (e == null) return false;
+        if (!isLoanRepayment(e)) return true;
+        String pm = e.getPaymentMethod() == null ? "" : e.getPaymentMethod().trim().toLowerCase();
+        return "cash".equals(pm) || "upi".equals(pm);
+    }
+
+    private static boolean isLoanRepayment(Expense e) {
+        if (e == null) return false;
+        if (e.getExpenseCategory() == ExpenseCategory.LOAN) return true;
+        String c = e.getCategory() == null ? "" : e.getCategory().trim().toLowerCase();
+        return "loan_repayment".equals(c) || "loan_repay".equals(c) || "loan".equals(c) || "market_loan".equals(c);
     }
 }
 

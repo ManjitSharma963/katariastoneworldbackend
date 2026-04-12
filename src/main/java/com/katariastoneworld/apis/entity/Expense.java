@@ -79,7 +79,7 @@ public class Expense {
     private Boolean isDeleted = false;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "expense_category", length = 32)
+    @Column(name = "expense_category", length = 32, columnDefinition = "VARCHAR(32)")
     private ExpenseCategory expenseCategory;
 
     @Enumerated(EnumType.STRING)

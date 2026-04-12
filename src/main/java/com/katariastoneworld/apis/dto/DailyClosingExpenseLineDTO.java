@@ -19,5 +19,7 @@ public class DailyClosingExpenseLineDTO {
     private LocalDate date;
     private String category;
     private Double amount;
+    /** Expense payment method (cash/upi/bank/card/cheque/...). */
+    private String paymentMethod;
     private String description;
 }

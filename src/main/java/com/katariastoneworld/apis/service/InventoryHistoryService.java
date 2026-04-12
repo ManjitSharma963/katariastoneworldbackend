@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -48,6 +50,24 @@ public class InventoryHistoryService {
     @Transactional(readOnly = true)
     public List<InventoryHistoryResponseDTO> getHistoryForProduct(Long productId) {
         return inventoryHistoryRepository.findByProductIdOrderByCreatedAtDesc(productId).stream()
+                .map(this::toDto)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryHistoryResponseDTO> getHistoryForLocation(
+            String location,
+            LocalDate from,
+            LocalDate to,
+            InventoryActionType actionType,
+            Integer limit) {
+        LocalDateTime fromTs = from != null ? from.atStartOfDay() : null;
+        LocalDateTime toExclusive = to != null ? to.plusDays(1).atStartOfDay() : null;
+        int lim = limit != null ? Math.max(1, Math.min(5000, limit)) : 1000;
+        return inventoryHistoryRepository
+                .findAllForLocationWithFilters(location, actionType, fromTs, toExclusive)
+                .stream()
+                .limit(lim)
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }

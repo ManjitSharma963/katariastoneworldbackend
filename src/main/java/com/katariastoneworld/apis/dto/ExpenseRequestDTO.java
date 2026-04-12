@@ -43,9 +43,12 @@ public class ExpenseRequestDTO {
     private Boolean settled;
 
     // Financial-domain metadata (optional for backward compatibility)
-    private String expenseCategory; // DAILY, SALARY, INVENTORY, MISC
+    private String expenseCategory; // DAILY, SALARY, INVENTORY, LOAN, MISC
     private String referenceType;   // DIRECT, PAYROLL, CLIENT
     private String referenceId;     // External record ID
+
+    /** When category is loan repayment: links repayment to a lender for ledger/history. */
+    private Long lenderId;
 
     // Location will be set from JWT token, not from request
 }

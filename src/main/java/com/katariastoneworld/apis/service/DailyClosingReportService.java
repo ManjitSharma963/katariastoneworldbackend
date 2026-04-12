@@ -141,6 +141,7 @@ public class DailyClosingReportService {
                         .date(e.getDate())
                         .category(e.getCategory())
                         .amount(e.getAmount() != null ? e.getAmount().doubleValue() : 0.0)
+                        .paymentMethod(e.getPaymentMethod())
                         .description(e.getDescription())
                         .build())
                 .collect(Collectors.toList());

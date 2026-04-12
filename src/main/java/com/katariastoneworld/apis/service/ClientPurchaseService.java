@@ -94,7 +94,12 @@ public class ClientPurchaseService {
         tx.setAmount(requestDTO.getAmount());
         tx.setPaymentMode(requestDTO.getPaymentMethod());
         tx.setTransactionDate(requestDTO.getDate());
-        tx.setNotes(requestDTO.getNotes());
+        String richNote = "Payment to " + clientPurchase.getClientName() + " — "
+                + (clientPurchase.getPurchaseDescription() != null ? clientPurchase.getPurchaseDescription() : "Purchase");
+        if (requestDTO.getNotes() != null && !requestDTO.getNotes().isBlank()) {
+            richNote = richNote + " — " + requestDTO.getNotes().trim();
+        }
+        tx.setNotes(richNote);
         clientTransactionService.create(tx, location, null);
 
         return convertToPaymentResponseDTO(saved);

@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,4 +39,14 @@ public interface FinancialLedgerRepository extends JpaRepository<FinancialLedger
             + "AND l.eventDate >= :from AND l.eventDate <= :to")
     BigDecimal sumInHandBillPaymentsByLocationAndDateRange(@Param("loc") String location, @Param("from") LocalDate from,
             @Param("to") LocalDate to, @Param("eventType") FinancialLedgerEntry.EventType eventType);
+
+    @Query("SELECT COALESCE(SUM(l.amount), 0) FROM FinancialLedgerEntry l WHERE LOWER(TRIM(l.location)) = LOWER(TRIM(:loc)) "
+            + "AND l.eventDate >= :from AND l.eventDate <= :to "
+            + "AND l.eventType IN :eventTypes AND l.paymentMode IN :modes")
+    BigDecimal sumAmountByLocationDateRangeTypesAndModes(
+            @Param("loc") String location,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("eventTypes") Collection<FinancialLedgerEntry.EventType> eventTypes,
+            @Param("modes") Collection<BillPaymentMode> modes);
 }

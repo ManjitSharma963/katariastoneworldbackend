@@ -9,7 +9,7 @@ public class RequestUtil {
         if (location == null) {
             throw new RuntimeException("User location not found in request. User must be authenticated.");
         }
-        return location.toString();
+        return location.toString().trim();
     }
     
     public static Long getUserIdFromRequest(HttpServletRequest request) {

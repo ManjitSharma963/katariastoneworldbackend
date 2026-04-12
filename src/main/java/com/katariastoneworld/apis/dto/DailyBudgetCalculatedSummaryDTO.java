@@ -44,5 +44,49 @@ public class DailyBudgetCalculatedSummaryDTO {
     /** Total of expense rows for remainingAsOfDate — aligns with Daily Closing report total expenses for one day. */
     private BigDecimal spentAmount;
 
+    /**
+     * Sum of loan RECEIPT ledger rows in [from, to] recorded via bank transfer or cheque (from entry notes).
+     * Used so UI can reflect bank inflows that are not expense rows.
+     */
+    private BigDecimal loanReceiptsBankChequeInRange;
+
+    /**
+     * Sum of loan REPAYMENT ledger rows in [from, to] via bank transfer or cheque (from entry notes).
+     */
+    private BigDecimal loanRepaymentsBankChequeInRange;
+
+    /**
+     * Credits to the “bank channel” budget in [from, to]: loan received (bank/card/cheque), client payments in,
+     * customer advance deposits — all recorded with bank transfer, cheque, or other non–cash/UPI modes in the financial ledger.
+     */
+    private BigDecimal bankCreditsInRange;
+
+    /**
+     * Debits from the “bank channel” budget: expenses paid by bank/card/cheque plus supplier bill payments the same way.
+     */
+    private BigDecimal bankDebitsInRange;
+
+    /**
+     * Debits from cash/UPI: expenses paid cash/UPI plus bill payments recorded as cash or UPI in the financial ledger.
+     */
+    private BigDecimal cashUpiDebitsInRange;
+
+    /**
+     * Credits to cash/UPI: loan receipts (cash/UPI), client payment in and advance deposits in cash/UPI (financial ledger).
+     */
+    private BigDecimal cashUpiCreditsInRange;
+
+    /**
+     * Bank opening carried into the first day of the requested range when {@code from} equals {@code to} and that date is today.
+     * Same field as {@code daily_budget.bank_opening_balance} after calendar-day rollover.
+     */
+    private BigDecimal bankOpeningBalanceCarriedForward;
+
+    /**
+     * {@link #bankOpeningBalanceCarriedForward} + (bank credits in range − bank debits in range) when single-day summary for today;
+     * otherwise null (callers use net movement only).
+     */
+    private BigDecimal bankBalanceIncludingOpening;
+
     private String location;
 }
