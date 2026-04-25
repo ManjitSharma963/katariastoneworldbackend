@@ -33,7 +33,7 @@ public class Expense {
     private String category;
     
     @NotNull(message = "Date is required")
-    @Column(nullable = false)
+    @Column(name = "expense_date", nullable = false)
     private LocalDate date;
     
     @Column(columnDefinition = "TEXT")
@@ -97,6 +97,9 @@ public class Expense {
     
     @PrePersist
     protected void onCreate() {
+        if (date == null) {
+            date = LocalDate.now();
+        }
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }

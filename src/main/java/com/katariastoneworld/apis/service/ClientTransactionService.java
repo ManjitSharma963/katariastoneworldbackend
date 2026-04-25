@@ -2,15 +2,19 @@ package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionResponseDTO;
-import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
-import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.entity.BillPaymentMode;
+import com.katariastoneworld.apis.entity.ClientTransaction;
+import com.katariastoneworld.apis.entity.ClientTransactionType;
 import com.katariastoneworld.apis.repository.ClientTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -19,9 +23,6 @@ public class ClientTransactionService {
 
     @Autowired
     private ClientTransactionRepository clientTransactionRepository;
-
-    @Autowired
-    private ExpenseService expenseService;
 
     @Autowired
     private FinancialLedgerService financialLedgerService;
@@ -44,21 +45,14 @@ public class ClientTransactionService {
         ClientTransaction saved = clientTransactionRepository.save(tx);
 
         if (type == ClientTransactionType.PAYMENT_OUT || type == ClientTransactionType.PURCHASE) {
-            // Mirror outflow to expenses so old reports keep working.
-            ExpenseRequestDTO ex = new ExpenseRequestDTO();
-            ex.setType("daily");
-            ex.setCategory("inventory");
-            ex.setDate(d);
-            ex.setAmount(amt);
-            ex.setPaymentMethod(toLegacyExpensePaymentMethod(mode));
-            String note = req.getNotes() != null ? req.getNotes().trim() : "";
-            ex.setDescription(note.isEmpty()
-                    ? ("Client transaction outflow: " + type.name() + " - " + saved.getClientId())
-                    : note);
-            ex.setExpenseCategory(ExpenseCategory.INVENTORY.name());
-            ex.setReferenceType(ReferenceType.CLIENT.name());
-            ex.setReferenceId(String.valueOf(saved.getId()));
-            expenseService.createExpense(ex, location);
+            financialLedgerService.recordClientPaymentOut(
+                    location,
+                    saved.getClientId(),
+                    saved.getId(),
+                    mode,
+                    amt,
+                    d
+            );
         } else if (type == ClientTransactionType.PAYMENT_IN) {
             financialLedgerService.recordClientPaymentIn(
                     location,
@@ -70,7 +64,7 @@ public class ClientTransactionService {
             );
         }
 
-        return toDto(saved);
+        return toDto(saved, null);
     }
 
     public List<ClientTransactionResponseDTO> list(String location, LocalDate from, LocalDate to, String typeRaw) {
@@ -85,11 +79,44 @@ public class ClientTransactionService {
         } else {
             rows = clientTransactionRepository.findByLocationOrderByTransactionDateDescIdDesc(location);
         }
-        return rows.stream().map(this::toDto).toList();
+        return rows.stream().map(r -> toDto(r, null)).toList();
     }
 
-    private ClientTransactionResponseDTO toDto(ClientTransaction row) {
-        return ClientTransactionResponseDTO.builder()
+    /**
+     * Chronological ledger for one client with running balance (signed: IN +, OUT/PURCHASE −).
+     */
+    public List<ClientTransactionResponseDTO> runningLedgerForClient(String location, String clientId) {
+        if (location == null || location.isBlank() || clientId == null || clientId.isBlank()) {
+            return List.of();
+        }
+        String loc = location.trim();
+        String cid = clientId.trim();
+        List<ClientTransaction> rows = clientTransactionRepository.findByLocationOrderByTransactionDateDescIdDesc(loc).stream()
+                .filter(t -> cid.equalsIgnoreCase(t.getClientId() != null ? t.getClientId().trim() : ""))
+                .sorted(Comparator
+                        .comparing(ClientTransaction::getTransactionDate)
+                        .thenComparing(ClientTransaction::getId))
+                .toList();
+        BigDecimal run = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        List<ClientTransactionResponseDTO> out = new ArrayList<>();
+        for (ClientTransaction row : rows) {
+            BigDecimal delta = signedAmount(row);
+            run = run.add(delta).setScale(2, RoundingMode.HALF_UP);
+            out.add(toDto(row, run));
+        }
+        return out;
+    }
+
+    private static BigDecimal signedAmount(ClientTransaction row) {
+        BigDecimal a = row.getAmount() != null ? row.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        if (row.getTransactionType() == ClientTransactionType.PAYMENT_IN) {
+            return a;
+        }
+        return a.negate();
+    }
+
+    private ClientTransactionResponseDTO toDto(ClientTransaction row, BigDecimal runningBalanceAfter) {
+        ClientTransactionResponseDTO dto = ClientTransactionResponseDTO.builder()
                 .id(row.getId())
                 .clientId(row.getClientId())
                 .transactionType(row.getTransactionType() != null ? row.getTransactionType().name() : null)
@@ -100,17 +127,8 @@ public class ClientTransactionService {
                 .location(row.getLocation())
                 .createdAt(row.getCreatedAt())
                 .build();
-    }
-
-    private static String toLegacyExpensePaymentMethod(BillPaymentMode mode) {
-        if (mode == null) return "cash";
-        return switch (mode) {
-            case CASH -> "cash";
-            case UPI -> "upi";
-            case BANK_TRANSFER -> "bank";
-            case CHEQUE -> "cheque";
-            case OTHER -> "other";
-        };
+        dto.setRunningBalanceAfter(runningBalanceAfter);
+        return dto;
     }
 }
 

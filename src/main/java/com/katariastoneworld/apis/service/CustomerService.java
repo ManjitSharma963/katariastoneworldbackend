@@ -103,6 +103,16 @@ public class CustomerService {
         return customerRepository.findByPhone(normalizedPhone)
                 .orElseThrow(() -> new RuntimeException("Customer not found with phone: " + normalizedPhone));
     }
+
+    public Customer getCustomerByPhone(String phone, String location) {
+        final String normalizedPhone = normalizePhoneOrThrow(phone);
+        if (location == null || location.trim().isEmpty()) {
+            throw new RuntimeException("Location is required to fetch customer by phone.");
+        }
+        return customerRepository.findByPhoneAndLocation(normalizedPhone, location)
+                .orElseThrow(() -> new RuntimeException(
+                        "Customer not found with phone: " + normalizedPhone + " for location: " + location));
+    }
     
     public List<CustomerResponseDTO> getAllCustomers(String location) {
         if (location == null || location.trim().isEmpty()) {

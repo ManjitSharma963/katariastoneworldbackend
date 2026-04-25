@@ -27,6 +27,9 @@ public class ClientPurchaseRequestDTO {
     
     @NotNull(message = "Purchase date is required")
     private LocalDate purchaseDate;
+
+    /** Optional; if omitted, may default from supplier payment terms (days after purchase date). */
+    private LocalDate dueDate;
     
     private String notes;
     

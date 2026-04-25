@@ -33,4 +33,13 @@ public class BillItemDTO {
                          // not provided
     private Double purchasePrice; // New field to store purchase price from product, if available
     private String hsnNumber; // HSN code from product (for GST bill)
+
+    /** DB line id (present on read; omit on create). */
+    private Long itemId;
+
+    /** Sum of recorded partial stock returns for this line (read model). */
+    private Double quantityReturnedToDate;
+
+    /** Remaining quantity that can still be physically returned ({@code quantity} − returned). */
+    private Double quantityReturnable;
 }

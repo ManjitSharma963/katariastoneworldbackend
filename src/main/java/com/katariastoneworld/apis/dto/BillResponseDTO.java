@@ -70,4 +70,13 @@ public class BillResponseDTO {
     private String hsnCode;
     private String vehicleNo;
     private String deliveryAddress;
+
+    private Boolean backdated;
+    private LocalDateTime originalCreatedAt;
+    private String backdateReason;
+    private String backdateApprovedBy;
+    private Boolean supplementaryBill;
+    private Long parentBillId;
+    private String parentBillType;
+    private String supplementaryReason;
 }

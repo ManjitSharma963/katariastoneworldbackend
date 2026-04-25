@@ -12,6 +12,10 @@ Once the application is running, access Swagger UI at:
 ```
 http://localhost:8080/swagger-ui.html
 ```
+Alternative URL used by newer springdoc UI routing:
+```
+http://localhost:8080/swagger-ui/index.html
+```
 
 **Important:** Swagger UI is **publicly accessible** - no authentication is required to view the API documentation.
 
@@ -44,6 +48,10 @@ The OpenAPI specification is available at:
 ```
 http://localhost:8080/api-docs
 ```
+Alternative URL (springdoc default):
+```
+http://localhost:8080/v3/api-docs
+```
 
 This can be imported into tools like Postman, Insomnia, or other API clients.
 
@@ -62,6 +70,38 @@ All protected endpoints require a JWT token in the Authorization header:
 ```
 Authorization: Bearer <your_jwt_token>
 ```
+
+---
+
+## Standard API Response Format
+
+Most JSON endpoints are wrapped in a standard envelope:
+
+```json
+{
+  "success": true,
+  "message": "Request completed successfully",
+  "data": {},
+  "errorCode": ""
+}
+```
+
+Error shape example:
+
+```json
+{
+  "success": false,
+  "message": "Validation failed",
+  "data": {
+    "fieldName": "must not be blank"
+  },
+  "errorCode": "VALIDATION_ERROR"
+}
+```
+
+Notes:
+- Binary/file responses (for example PDF downloads) are not wrapped.
+- `204 No Content` responses intentionally return no body.
 
 ---
 

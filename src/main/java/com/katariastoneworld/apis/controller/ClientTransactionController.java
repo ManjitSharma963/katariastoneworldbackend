@@ -43,5 +43,17 @@ public class ClientTransactionController {
         String location = RequestUtil.getLocationFromRequest(request);
         return ResponseEntity.ok(clientTransactionService.list(location, from, to, transactionType));
     }
+
+    /**
+     * Chronological rows for one client/supplier with {@code runningBalanceAfter} (signed: PAYMENT_IN +, OUT/PURCHASE −).
+     */
+    @GetMapping("/running-ledger")
+    @RequiresRole("admin")
+    public ResponseEntity<List<ClientTransactionResponseDTO>> runningLedger(
+            @RequestParam("clientId") String clientId,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(clientTransactionService.runningLedgerForClient(location, clientId));
+    }
 }
 

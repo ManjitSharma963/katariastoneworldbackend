@@ -4,6 +4,10 @@ import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
 import com.katariastoneworld.apis.dto.ExpenseResponseDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
+import com.katariastoneworld.apis.entity.BillPaymentMode;
+import com.katariastoneworld.apis.entity.LedgerPaymentMode;
+import com.katariastoneworld.apis.entity.LedgerSources;
+import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.ReferenceType;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +35,9 @@ public class ExpenseService {
 
     @Autowired
     private LoanLedgerService loanLedgerService;
+
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
 
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
@@ -75,6 +82,7 @@ public class ExpenseService {
             dailyBudgetService.adjustRemainingForDailyExpense(location, savedExpense.getAmount().negate());
         }
         loanLedgerService.syncRepaymentLedger(savedExpense, requestDTO.getLenderId());
+        syncUnifiedLedgerForExpense(savedExpense);
         return convertToResponseDTO(savedExpense);
     }
     
@@ -153,6 +161,7 @@ public class ExpenseService {
             dailyBudgetService.adjustRemainingForDailyExpense(location, updatedExpense.getAmount().negate());
         }
         loanLedgerService.syncRepaymentLedger(updatedExpense, requestDTO.getLenderId());
+        syncUnifiedLedgerForExpense(updatedExpense);
         return convertToResponseDTO(updatedExpense);
     }
     
@@ -163,6 +172,9 @@ public class ExpenseService {
             throw new RuntimeException("Expense not found with id: " + id);
         }
         loanLedgerService.deleteRepaymentByExpenseId(expense.getId());
+        financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
+        financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+        financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
         if (LocalDate.now().equals(expense.getDate())
                 && expense.getAmount() != null
                 && shouldAffectDailyInHandBudget(expense)) {
@@ -173,7 +185,56 @@ public class ExpenseService {
         expense.setIsDeleted(true);
         expenseRepository.save(expense);
     }
-    
+
+    /**
+     * Dual-write Phase 2: {@code unified_financial_ledger} via {@link FinancialLedgerService#recordTransaction}.
+     * Payroll-mirrored expenses use SALARY_* only; synced loan repayments use LOAN_REPAY from {@link LoanLedgerService}.
+     */
+    private void syncUnifiedLedgerForExpense(Expense expense) {
+        if (expense == null || expense.getId() == null || expense.getAmount() == null) {
+            return;
+        }
+        if (expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
+            return;
+        }
+        if (expense.getReferenceType() == ReferenceType.PAYROLL) {
+            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
+            return;
+        }
+        if (loanLedgerService.isSyncedLoanRepaymentExpense(expense)
+                && loanLedgerService.hasRepaymentLedgerRowForExpense(expense.getId())) {
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
+            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
+            return;
+        }
+        BillPaymentMode mode;
+        try {
+            mode = BillPaymentMode.parseFlexible(expense.getPaymentMethod());
+        } catch (Exception ex) {
+            mode = BillPaymentMode.OTHER;
+        }
+        financialLedgerService.syncExpenseDebit(
+                expense.getLocation(),
+                expense.getId(),
+                mode,
+                expense.getAmount(),
+                expense.getDate(),
+                expense.getDescription(),
+                true);
+        financialLedgerService.recordTransaction(
+                expense.getLocation(),
+                expense.getDate(),
+                expense.getAmount(),
+                LedgerTransactionType.DEBIT,
+                LedgerPaymentMode.fromLegacyPaymentMethod(expense.getPaymentMethod()),
+                LedgerSources.EXPENSE,
+                expense.getId(),
+                expense.getDescription());
+    }
+
     private ExpenseResponseDTO convertToResponseDTO(Expense expense) {
         ExpenseResponseDTO dto = new ExpenseResponseDTO();
         dto.setId(expense.getId());

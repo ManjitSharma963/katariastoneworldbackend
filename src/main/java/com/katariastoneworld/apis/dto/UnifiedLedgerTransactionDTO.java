@@ -1,0 +1,24 @@
+package com.katariastoneworld.apis.dto;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Data;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+/** One row from {@code unified_financial_ledger} for UI transaction history. */
+@Data
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class UnifiedLedgerTransactionDTO {
+
+    private Long id;
+    private LocalDate txnDate;
+    private String txnType;
+    private BigDecimal amount;
+    private String paymentMode;
+    private String source;
+    private Long referenceId;
+    private String description;
+    private LocalDateTime createdAt;
+}

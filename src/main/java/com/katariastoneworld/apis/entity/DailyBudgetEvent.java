@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "daily_budget_events", indexes = {
-        @Index(name = "idx_daily_budget_events_location_date", columnList = "location,date")
+        @Index(name = "idx_daily_budget_events_location_date", columnList = "location,event_date")
 })
 @Data
 @NoArgsConstructor
@@ -27,7 +27,7 @@ public class DailyBudgetEvent {
     @Column(nullable = false, length = 50)
     private String location;
 
-    @Column(nullable = false)
+    @Column(name = "event_date", nullable = false)
     private LocalDate date;
 
     @Column(name = "opening_balance", precision = 12, scale = 2, nullable = false)
@@ -50,6 +50,9 @@ public class DailyBudgetEvent {
 
     @PrePersist
     protected void onCreate() {
+        if (date == null) {
+            date = LocalDate.now();
+        }
         createdAt = LocalDateTime.now();
     }
 }

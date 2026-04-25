@@ -114,6 +114,30 @@ public class BillGST {
     /** Delivery address for this sale (may differ from customer registered address). */
     @Column(name = "delivery_address", columnDefinition = "TEXT")
     private String deliveryAddress;
+
+    @Column(name = "is_backdated", nullable = false)
+    private Boolean backdated = false;
+
+    @Column(name = "original_created_at")
+    private LocalDateTime originalCreatedAt;
+
+    @Column(name = "backdate_reason", length = 500)
+    private String backdateReason;
+
+    @Column(name = "backdate_approved_by", length = 120)
+    private String backdateApprovedBy;
+
+    @Column(name = "is_supplementary", nullable = false)
+    private Boolean supplementaryBill = false;
+
+    @Column(name = "parent_bill_id")
+    private Long parentBillId;
+
+    @Column(name = "parent_bill_type", length = 16)
+    private String parentBillType;
+
+    @Column(name = "supplementary_reason", length = 500)
+    private String supplementaryReason;
     
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemGST> items = new ArrayList<>();
@@ -138,6 +162,9 @@ public class BillGST {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (originalCreatedAt == null) {
+            originalCreatedAt = createdAt;
+        }
         if (billDate == null) {
             billDate = LocalDate.now();
         }

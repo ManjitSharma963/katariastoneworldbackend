@@ -18,6 +18,9 @@ public class ClientPurchaseResponseDTO {
     private String purchaseDescription;
     private BigDecimal totalAmount;
     private LocalDate purchaseDate;
+    private LocalDate dueDate;
+    private BigDecimal amountPaid;
+    private BigDecimal amountOutstanding;
     private String notes;
     private String location;
     private LocalDateTime createdAt;

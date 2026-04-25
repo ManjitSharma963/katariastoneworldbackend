@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.PayrollAdvanceRequestDTO;
 import com.katariastoneworld.apis.dto.PayrollSalarySettlementRequestDTO;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.Employee;
+import com.katariastoneworld.apis.entity.LedgerPaymentMode;
+import com.katariastoneworld.apis.entity.LedgerSources;
+import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry.EventType;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
@@ -42,6 +45,9 @@ public class PayrollLedgerService {
 
     @Autowired
     private DailyBudgetService dailyBudgetService;
+
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
 
     public EmployeePayrollLedgerEntry recordAdvance(Long employeeId, PayrollAdvanceRequestDTO req, String location, Long actorUserId) {
         Employee emp = employeeRepository.findByIdAndLocation(employeeId, location)
@@ -84,6 +90,15 @@ public class PayrollLedgerService {
         if (LocalDate.now().equals(d)) {
             dailyBudgetService.adjustRemainingForDailyExpense(location, amt.negate());
         }
+        financialLedgerService.recordTransaction(
+                location,
+                d,
+                amt,
+                LedgerTransactionType.DEBIT,
+                LedgerPaymentMode.fromBillPaymentMode(mode),
+                LedgerSources.SALARY_ADVANCE,
+                saved.getId(),
+                "Employee advance: " + emp.getEmployeeName());
         return saved;
     }
 
@@ -166,6 +181,15 @@ public class PayrollLedgerService {
             if (LocalDate.now().equals(d)) {
                 dailyBudgetService.adjustRemainingForDailyExpense(location, desiredCashPaid.negate());
             }
+            financialLedgerService.recordTransaction(
+                    location,
+                    d,
+                    desiredCashPaid,
+                    LedgerTransactionType.DEBIT,
+                    LedgerPaymentMode.fromBillPaymentMode(mode),
+                    LedgerSources.SALARY_PAY,
+                    pay.getId(),
+                    "Salary payment: " + emp.getEmployeeName() + " - " + month);
         }
 
         return buildSummary(emp, location, month);
@@ -282,6 +306,7 @@ public class PayrollLedgerService {
             case UPI -> "upi";
             case BANK_TRANSFER -> "bank";
             case CHEQUE -> "cheque";
+            case WALLET -> "bank";
             case OTHER -> "other";
         };
     }

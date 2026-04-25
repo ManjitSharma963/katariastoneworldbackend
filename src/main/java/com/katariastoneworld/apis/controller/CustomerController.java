@@ -53,11 +53,12 @@ public class CustomerController {
     
     @GetMapping("/phone/{phone}")
     @RequiresRole({"user", "admin"})
-    public ResponseEntity<CustomerResponseDTO> getCustomerByPhone(@PathVariable String phone) {
+    public ResponseEntity<CustomerResponseDTO> getCustomerByPhone(@PathVariable String phone, HttpServletRequest request) {
         if (phone == null || !phone.matches("^[0-9]{10}$")) {
             return ResponseEntity.badRequest().build();
         }
-        com.katariastoneworld.apis.entity.Customer customer = customerService.getCustomerByPhone(phone);
+        String location = RequestUtil.getLocationFromRequest(request);
+        com.katariastoneworld.apis.entity.Customer customer = customerService.getCustomerByPhone(phone, location);
         CustomerResponseDTO response = customerService.convertToResponseDTO(customer);
         return ResponseEntity.ok(response);
     }

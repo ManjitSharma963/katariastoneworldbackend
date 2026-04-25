@@ -2,9 +2,12 @@ package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.DailyClosingReportDTO;
+import com.katariastoneworld.apis.dto.DailyClosingSnapshotDTO;
 import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
 import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
+import com.katariastoneworld.apis.dto.SalesChargesSummaryDTO;
 import com.katariastoneworld.apis.service.DailyClosingReportService;
+import com.katariastoneworld.apis.service.DailyClosingSnapshotService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -23,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -33,20 +37,21 @@ public class ReportController {
     @Autowired
     private DailyClosingReportService dailyClosingReportService;
 
+    @Autowired
+    private DailyClosingSnapshotService dailyClosingSnapshotService;
+
     @Operation(summary = "Daily closing report",
             description = """
                     Location-scoped (from JWT). Pass **date** (start) and optional **dateTo** (end, inclusive).
                     When **dateTo** is omitted, the report is for the single day **date** (default closing behaviour).
                     When **date** and **dateTo** differ, bills with `bill_date` in the range are listed; **totalCollected** /
-                    **paymentSummary** sum `bill_payments.payment_date` in that range; expenses use `expenses.date` in range;
+                    **paymentSummary** sum `bill_payments.payment_date` in that range; expenses use `expenses.expense_date` in range;
                     **cashInHand** = cash collected in range − expenses in range.
                     **totalAdvanceDeposits** / **totalAdvanceAppliedOnBills** sum customer token deposits and advance usage
                     with `created_at` in the period (location via customer).
                     **paymentSummary** keys include CASH, UPI, BANK_TRANSFER, CHEQUE, and OTHER (e.g. null mode).
                     Response may include **warnings** (e.g. long date range) and **collectionsReconciliationOk** / **collectionsReconciliationDelta**
                     to verify mode totals vs **totalCollected** (not a substitute for accounting sign-off).
-                    **backfillLegacy** (default false): when `true` and the period is a single day, persists one `bill_payments` row
-                    for legacy PAID bills that have `payment_method` but no payment rows (one-off data repair; not used by the inventory UI).
                     Physical table name is `bill_payments` (bill_kind + bill_id for GST vs non-GST).
                     """)
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DailyClosingReportDTO.class)))
@@ -58,10 +63,6 @@ public class ReportController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @Parameter(description = "End of period (inclusive). Omit for a single-day report.")
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
-            @Parameter(description = """
-                    When true and the period is a single day: writes one bill_payment row for legacy PAID bills that have
-                    payment_method but no rows (use sparingly for DB repair; not exposed in the Reports UI). Default false.""")
-            @RequestParam(defaultValue = "false") boolean backfillLegacy,
             HttpServletRequest request) {
         LocalDate end = dateTo != null ? dateTo : date;
         if (end.isBefore(date)) {
@@ -70,8 +71,7 @@ public class ReportController {
                     "message", "dateTo must be on or after date"));
         }
         String location = RequestUtil.getLocationFromRequest(request);
-        boolean backfill = backfillLegacy && date.equals(end);
-        DailyClosingReportDTO dto = dailyClosingReportService.buildReportForPeriod(date, end, location, backfill);
+        DailyClosingReportDTO dto = dailyClosingReportService.buildReportForPeriod(date, end, location);
         return ResponseEntity.ok(dto);
     }
 
@@ -89,6 +89,22 @@ public class ReportController {
         return ResponseEntity.ok(dailyClosingReportService.paymentModeTotalsForSales(date, end, location));
     }
 
+    @Operation(summary = "Sales charge summary",
+            description = "Date-based summary for sales sqft, labour charge and other-expense charge from bills.")
+    @GetMapping("/sales-charges-summary")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<SalesChargesSummaryDTO> salesChargesSummary(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        LocalDate end = dateTo != null ? dateTo : date;
+        if (end.isBefore(date)) {
+            end = date;
+        }
+        return ResponseEntity.ok(dailyClosingReportService.salesChargesSummary(date, end, location));
+    }
+
     @GetMapping("/reconciliation")
     @RequiresRole({"user", "admin"})
     public ResponseEntity<ReconciliationReportDTO> reconciliation(
@@ -96,5 +112,24 @@ public class ReportController {
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         return ResponseEntity.ok(dailyClosingReportService.reconciliation(date, location));
+    }
+
+    @GetMapping("/daily-closing/snapshot")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<DailyClosingSnapshotDTO> getSnapshot(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(dailyClosingSnapshotService.getSnapshot(date, location));
+    }
+
+    @GetMapping("/daily-closing/snapshots")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<List<DailyClosingSnapshotDTO>> getSnapshotRange(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(dailyClosingSnapshotService.getSnapshots(from, to, location));
     }
 }

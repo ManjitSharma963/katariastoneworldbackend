@@ -8,10 +8,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CustomerAdvanceSummaryDTO {
-    /** Sum of original advance amounts recorded for this customer. */
+    /** Sum of customer advance deposits ({@code ADVANCE_DEPOSIT} credits), excluding bill-cancel refunds. */
     private Double totalAdvance;
-    /** Portion already applied to bills (sum of usage). */
+    /** Amount applied to bills ({@code BILL_PAYMENT} debits). */
     private Double totalUsed;
-    /** Sum of remaining_amount across advance rows. */
+    /** Active wallet balance (all credits minus all debits). */
     private Double remaining;
 }

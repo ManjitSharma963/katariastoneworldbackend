@@ -7,6 +7,7 @@ public enum BillPaymentMode {
     UPI,
     BANK_TRANSFER,
     CHEQUE,
+    WALLET,
     OTHER;
 
     /**
@@ -27,6 +28,7 @@ public enum BillPaymentMode {
             case "BANK_TRANSFER", "BANK", "BANKTRANSFER", "NETBANKING", "NET_BANKING", "NEFT", "RTGS", "IMPS" ->
                     BANK_TRANSFER;
             case "CHEQUE", "CHECK", "DD" -> CHEQUE;
+            case "WALLET", "ADVANCE" -> WALLET;
             case "OTHER" -> OTHER;
             default -> throw new IllegalArgumentException("Unknown payment mode: " + raw);
         };

@@ -92,6 +92,10 @@ public class ProductRequestDTO {
     @JsonAlias({"hsn_number", "hsnNumber"})
     private String hsnNumber; // HSN code for GST (e.g. 2517, 6802)
 
+    @JsonAlias({"min_stock", "minStock"})
+    @JsonDeserialize(using = DoubleDeserializer.class)
+    private Double minStock;
+
     /** Optional audit note stored with product change history (PUT /inventory/{id}). */
     @JsonAlias({"update_notes", "updateNotes"})
     private String updateNotes;

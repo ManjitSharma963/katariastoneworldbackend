@@ -1,105 +1,94 @@
 package com.katariastoneworld.apis.exception;
 
+import com.katariastoneworld.apis.dto.ApiResponseDTO;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.UUID;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    private static void putRequestId(Map<String, String> body) {
-        body.putIfAbsent("requestId", UUID.randomUUID().toString());
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponseDTO<Object>> handleIllegalArgument(IllegalArgumentException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponseDTO.error(
+                        ex.getMessage() != null ? ex.getMessage() : "Invalid request",
+                        null,
+                        "INVALID_ARGUMENT"));
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException ex) {
-        Map<String, String> error = new HashMap<>();
-        String m = ex.getMessage() != null ? ex.getMessage() : "Invalid request";
-        error.put("message", m);
-        error.put("error", m);
-        putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+    @ExceptionHandler(SecurityException.class)
+    public ResponseEntity<ApiResponseDTO<Object>> handleSecurity(SecurityException ex) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(ApiResponseDTO.error(
+                        ex.getMessage() != null ? ex.getMessage() : "Unauthorized",
+                        null,
+                        "UNAUTHORIZED"));
     }
-    
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new HashMap<>();
-        ex.getBindingResult().getFieldErrors().forEach(error -> {
-            errors.put(error.getField(), error.getDefaultMessage());
-        });
-        putRequestId(errors);
-        return new ResponseEntity<>(errors, HttpStatus.BAD_REQUEST);
+    public ResponseEntity<ApiResponseDTO<Object>> handleValidationExceptions(MethodArgumentNotValidException ex) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
+        for (FieldError err : ex.getBindingResult().getFieldErrors()) {
+            fieldErrors.put(err.getField(), err.getDefaultMessage());
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponseDTO.error("Validation failed", fieldErrors, "VALIDATION_ERROR"));
     }
-    
+
     @ExceptionHandler(NoResourceFoundException.class)
-    public ResponseEntity<Map<String, String>> handleNoResourceFoundException(NoResourceFoundException ex) {
-        Map<String, String> error = new HashMap<>();
+    public ResponseEntity<ApiResponseDTO<Object>> handleNoResourceFoundException(NoResourceFoundException ex) {
         String resourcePath = ex.getResourcePath();
-        
-        // Handle empty or null paths
-        if (resourcePath == null || resourcePath.isEmpty() || resourcePath.equals(".") || resourcePath.equals("/")) {
-            error.put("error", "Invalid request path. Please check your API endpoint URL.");
-            error.put("message", "Available API endpoints: /api/inventory, /api/bills, /api/heroes");
-            putRequestId(error);
-            return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+        Map<String, String> payload = new LinkedHashMap<>();
+
+        if (resourcePath == null || resourcePath.isBlank() || resourcePath.equals(".") || resourcePath.equals("/")) {
+            payload.put("path", String.valueOf(resourcePath));
+            payload.put("hint", "Available endpoints include /api/inventory, /api/bills, /api/auth");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponseDTO.error("Invalid request path", payload, "RESOURCE_NOT_FOUND"));
         }
-        
-        // Handle /auth/** paths - redirect to /api/auth/**
+
         if (resourcePath.startsWith("/auth/")) {
-            String apiPath = resourcePath.replaceFirst("^/auth", "/api/auth");
-            error.put("error", "Endpoint not found: " + resourcePath);
-            error.put("message", "Please use the correct API path: " + apiPath);
-            error.put("suggestion", "Use /api/auth/register, /api/auth/login, or /api/auth/me instead");
-        } 
-        // Provide helpful message for API endpoints
-        else if (resourcePath.startsWith("/api/") || resourcePath.startsWith("/inventory") || 
-            resourcePath.startsWith("/bills") || resourcePath.startsWith("/heroes")) {
-            error.put("error", "API endpoint not found: " + resourcePath + ". Please check the endpoint URL.");
-            error.put("message", "Make sure you're calling the correct API endpoint. Available endpoints: /api/inventory, /api/bills, /api/heroes");
-        } else {
-            error.put("error", "Resource not found: " + resourcePath);
-            error.put("message", "This is an API server. Static resources are not available.");
+            payload.put("path", resourcePath);
+            payload.put("suggestedPath", resourcePath.replaceFirst("^/auth", "/api/auth"));
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponseDTO.error("Endpoint not found", payload, "RESOURCE_NOT_FOUND"));
         }
-        putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+
+        payload.put("path", resourcePath);
+        payload.put("hint", "Check the endpoint URL and HTTP method");
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponseDTO.error("Resource not found", payload, "RESOURCE_NOT_FOUND"));
     }
-    
-    /**
-     * DB constraint issues (e.g. invalid enum value, duplicate key). Prefer a clear message for the client.
-     */
+
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, String>> handleDataIntegrity(DataIntegrityViolationException ex) {
-        Map<String, String> error = new HashMap<>();
+    public ResponseEntity<ApiResponseDTO<Object>> handleDataIntegrity(DataIntegrityViolationException ex) {
         Throwable root = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause() : ex;
-        String msg = root.getMessage() != null ? root.getMessage() : ex.getMessage();
-        String hint = " If this mentions ENUM or expense_category, alter column to VARCHAR, e.g. ALTER TABLE expenses MODIFY expense_category VARCHAR(32) NULL;";
-        error.put("message", (msg != null ? msg : "Database constraint violation") + hint);
-        putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.BAD_REQUEST);
+        String msg = root.getMessage() != null ? root.getMessage() : "Database constraint violation";
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponseDTO.error(msg, null, "DATA_INTEGRITY_ERROR"));
     }
 
     @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<Map<String, String>> handleRuntimeException(RuntimeException ex) {
-        Map<String, String> error = new HashMap<>();
-        error.put("error", ex.getMessage() != null ? ex.getMessage() : "Request failed");
-        putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+    public ResponseEntity<ApiResponseDTO<Object>> handleRuntimeException(RuntimeException ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponseDTO.error(
+                        ex.getMessage() != null ? ex.getMessage() : "Request failed",
+                        null,
+                        "RUNTIME_ERROR"));
     }
-    
+
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, String>> handleGenericException(Exception ex) {
-        Map<String, String> error = new HashMap<>();
-        error.put("error", "An unexpected error occurred: " + ex.getMessage());
-        putRequestId(error);
-        return new ResponseEntity<>(error, HttpStatus.INTERNAL_SERVER_ERROR);
+    public ResponseEntity<ApiResponseDTO<Object>> handleGenericException(Exception ex) {
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(ApiResponseDTO.error("An unexpected error occurred", null, "INTERNAL_ERROR"));
     }
 }
-

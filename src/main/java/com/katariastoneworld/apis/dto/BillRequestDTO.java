@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 import com.fasterxml.jackson.annotation.JsonAlias;
 
 import java.util.List;
+import java.time.LocalDate;
 
 @Data
 @NoArgsConstructor
@@ -85,5 +86,32 @@ public class BillRequestDTO {
 
     @Size(max = 2000, message = "Delivery address must be at most 2000 characters")
     private String deliveryAddress;
+
+    /** Optional bill date. Backdated dates require admin approval controls. */
+    private LocalDate billDate;
+
+    /** Mandatory for backdated bills. */
+    @Size(max = 500, message = "Backdate reason must be at most 500 characters")
+    private String backdateReason;
+
+    /** Mandatory for backdated bills. */
+    @Size(max = 120, message = "Backdate approvedBy must be at most 120 characters")
+    private String backdateApprovedBy;
+
+    /** Allows payment lines with past paymentDate only for admin-approved backdated cash posting. */
+    private Boolean allowBackdatedPaymentDate = false;
+
+    /** Mandatory when allowBackdatedPaymentDate=true and a past payment date is supplied. */
+    @Size(max = 120, message = "Backdated payment approvedBy must be at most 120 characters")
+    private String backdatedPaymentApprovedBy;
+
+    /** Optional linkage for supplementary bills. */
+    private Long parentBillId;
+    /** Optional linkage for supplementary bills (GST or NON_GST). */
+    @Size(max = 16, message = "Parent bill type must be at most 16 characters")
+    private String parentBillType;
+    /** Optional reason for supplementary bill creation. */
+    @Size(max = 500, message = "Supplementary reason must be at most 500 characters")
+    private String supplementaryReason;
 }
 

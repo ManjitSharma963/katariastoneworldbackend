@@ -20,7 +20,6 @@ public class BillPayment {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "payment_id")
     private Long id;
 
     @Enumerated(EnumType.STRING)
@@ -29,6 +28,9 @@ public class BillPayment {
 
     @Column(name = "bill_id", nullable = false)
     private Long billId;
+
+    @Column(name = "source_type", length = 32)
+    private String sourceType;
 
     @Column(nullable = false, precision = 14, scale = 2)
     private BigDecimal amount;

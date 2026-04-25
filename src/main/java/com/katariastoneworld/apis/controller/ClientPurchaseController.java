@@ -1,10 +1,12 @@
 package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
+import com.katariastoneworld.apis.dto.ClientModuleAlertDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentResponseDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseResponseDTO;
+import com.katariastoneworld.apis.service.ClientModuleAlertsService;
 import com.katariastoneworld.apis.service.ClientPurchaseService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -23,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/client-purchases")
@@ -31,6 +34,21 @@ public class ClientPurchaseController {
     
     @Autowired
     private ClientPurchaseService clientPurchaseService;
+
+    @Autowired
+    private ClientModuleAlertsService clientModuleAlertsService;
+
+    @Operation(
+            summary = "Due and credit alerts",
+            description = "Overdue purchases (with balance) and suppliers over configured credit limit."
+    )
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/due-alerts")
+    @RequiresRole("admin")
+    public ResponseEntity<List<ClientModuleAlertDTO>> getDueAlerts(HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(clientModuleAlertsService.listAlerts(location));
+    }
     
     @Operation(
             summary = "Create a new client purchase",
@@ -141,7 +159,7 @@ public class ClientPurchaseController {
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @PostMapping("/{id}/payments")
     @RequiresRole({"user", "admin"})
-    public ResponseEntity<ClientPurchasePaymentResponseDTO> createPayment(
+    public ResponseEntity<?> createPayment(
             @PathVariable Long id,
             @Valid @RequestBody ClientPurchasePaymentRequestDTO requestDTO,
             HttpServletRequest request) {
@@ -150,7 +168,15 @@ public class ClientPurchaseController {
             ClientPurchasePaymentResponseDTO response = clientPurchaseService.createPayment(id, requestDTO, location);
             return new ResponseEntity<>(response, HttpStatus.CREATED);
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+            String msg = e.getMessage() != null ? e.getMessage() : "Payment failed";
+            /*
+             * Previously every failure returned 404, which hid real causes (bad payment mode, auth context, etc.)
+             * and looked like a "missing route" to the frontend.
+             */
+            if (msg.contains("Client purchase not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", msg));
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", msg));
         }
     }
     

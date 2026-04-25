@@ -29,6 +29,15 @@ public class CategoryController {
         CategoryResponseDTO response = categoryService.createCategory(categoryRequestDTO);
         return new ResponseEntity<>(response, HttpStatus.CREATED);
     }
+
+    @PutMapping("/{id}")
+    @RequiresRole("admin")
+    public ResponseEntity<CategoryResponseDTO> updateCategory(
+            @PathVariable Long id,
+            @Valid @RequestBody CategoryRequestDTO categoryRequestDTO) {
+        CategoryResponseDTO response = categoryService.updateCategory(id, categoryRequestDTO);
+        return ResponseEntity.ok(response);
+    }
     
     @GetMapping
     public ResponseEntity<List<CategoryResponseDTO>> getAllCategories(
@@ -49,6 +58,13 @@ public class CategoryController {
     public ResponseEntity<CategoryResponseDTO> getCategoryById(@PathVariable Long id) {
         CategoryResponseDTO category = categoryService.getCategoryById(id);
         return ResponseEntity.ok(category);
+    }
+
+    @DeleteMapping("/{id}")
+    @RequiresRole("admin")
+    public ResponseEntity<Void> deleteCategory(@PathVariable Long id) {
+        categoryService.deleteCategory(id);
+        return ResponseEntity.noContent().build();
     }
 }
 

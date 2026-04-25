@@ -13,5 +13,6 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     List<Category> findByIsActiveTrueOrderByDisplayOrderAsc();
     List<Category> findByCategoryTypeAndIsActiveTrueOrderByDisplayOrderAsc(String categoryType);
     Category findByNameAndCategoryType(String name, String categoryType);
+    Category findByNameAndCategoryTypeAndIdNot(String name, String categoryType, Long id);
 }
 

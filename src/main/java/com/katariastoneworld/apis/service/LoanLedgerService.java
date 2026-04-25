@@ -5,6 +5,9 @@ import com.katariastoneworld.apis.dto.LoanLenderSummaryDTO;
 import com.katariastoneworld.apis.dto.LoanReceiptRequestDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
+import com.katariastoneworld.apis.entity.LedgerPaymentMode;
+import com.katariastoneworld.apis.entity.LedgerSources;
+import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.LoanLedgerEntry;
 import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
 import com.katariastoneworld.apis.entity.LoanLender;
@@ -37,6 +40,22 @@ public class LoanLedgerService {
     @Autowired
     private DailyBudgetService dailyBudgetService;
 
+    @Autowired
+    private FinancialLedgerService financialLedgerService;
+
+    /** Matches {@link #syncRepaymentLedger} — daily loan-category expenses get LOAN_REPAY, not EXPENSE, in unified ledger. */
+    public boolean isSyncedLoanRepaymentExpense(Expense expense) {
+        if (expense == null) {
+            return false;
+        }
+        return expense.getExpenseCategory() == ExpenseCategory.LOAN
+                && expense.getType() != null && "daily".equalsIgnoreCase(expense.getType().trim());
+    }
+
+    public boolean hasRepaymentLedgerRowForExpense(Long expenseId) {
+        return expenseId != null && loanLedgerEntryRepository.findByExpenseId(expenseId).isPresent();
+    }
+
     public void recordLoanReceipt(String location, LoanReceiptRequestDTO body) {
         if (location == null || location.isBlank() || body == null || body.getAmount() == null
                 || body.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
@@ -53,6 +72,24 @@ public class LoanLedgerService {
         String mode = normalizePaymentMode(body.getPaymentMode());
         entry.setNotes(composeNotesWithMode(body.getNotes(), mode));
         loanLedgerEntryRepository.save(entry);
+
+        String nm = normalizePaymentMode(body.getPaymentMode());
+        LedgerPaymentMode ledgerPm = switch (nm) {
+            case "bank_transfer" -> LedgerPaymentMode.BANK;
+            case "cheque" -> LedgerPaymentMode.CHEQUE;
+            case "upi" -> LedgerPaymentMode.UPI;
+            case "cash" -> LedgerPaymentMode.CASH;
+            default -> LedgerPaymentMode.CASH;
+        };
+        financialLedgerService.recordTransaction(
+                loc,
+                entry.getEntryDate(),
+                entry.getAmount(),
+                LedgerTransactionType.CREDIT,
+                ledgerPm,
+                LedgerSources.LOAN,
+                entry.getId(),
+                "Loan received lender=" + lender.getDisplayName());
 
         if (affectsDailyBudget(mode)) {
             dailyBudgetService.recordLoanReceipt(
@@ -79,6 +116,7 @@ public class LoanLedgerService {
         entry.setNotes(composeNotesWithMode(expense.getDescription(), normalizePaymentMode(expense.getPaymentMethod())));
         entry.setExpenseId(expense.getId());
         loanLedgerEntryRepository.save(entry);
+        syncUnifiedLoanRepay(expense);
     }
 
     /**
@@ -89,15 +127,16 @@ public class LoanLedgerService {
             return;
         }
         Optional<LoanLedgerEntry> opt = loanLedgerEntryRepository.findByExpenseId(expense.getId());
-        boolean isLoanRepayment = expense.getExpenseCategory() == ExpenseCategory.LOAN
-                && expense.getType() != null && "daily".equalsIgnoreCase(expense.getType().trim());
+        boolean isLoanRepayment = isSyncedLoanRepaymentExpense(expense);
 
         if (!isLoanRepayment) {
             opt.ifPresent(loanLedgerEntryRepository::delete);
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
             return;
         }
         if (lenderIdFromRequest == null) {
             opt.ifPresent(loanLedgerEntryRepository::delete);
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
             return;
         }
         assertLenderBelongsToLocation(lenderIdFromRequest, expense.getLocation());
@@ -110,6 +149,7 @@ public class LoanLedgerService {
             le.setEntryDate(expense.getDate() != null ? expense.getDate() : LocalDate.now());
             le.setNotes(composeNotesWithMode(expense.getDescription(), normalizePaymentMode(expense.getPaymentMethod())));
             loanLedgerEntryRepository.save(le);
+            syncUnifiedLoanRepay(expense);
         } else {
             recordRepayment(expense, lenderIdFromRequest);
         }
@@ -119,7 +159,29 @@ public class LoanLedgerService {
         if (expenseId == null) {
             return;
         }
-        loanLedgerEntryRepository.findByExpenseId(expenseId).ifPresent(loanLedgerEntryRepository::delete);
+        loanLedgerEntryRepository.findByExpenseId(expenseId).ifPresent(entry -> {
+            financialLedgerService.removeTransaction(entry.getLocation(), LedgerSources.LOAN_REPAY, expenseId);
+            loanLedgerEntryRepository.delete(entry);
+        });
+    }
+
+    private void syncUnifiedLoanRepay(Expense expense) {
+        if (expense == null || expense.getId() == null || expense.getLocation() == null) {
+            return;
+        }
+        if (expense.getAmount() == null || expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+            return;
+        }
+        financialLedgerService.recordTransaction(
+                expense.getLocation(),
+                expense.getDate() != null ? expense.getDate() : LocalDate.now(),
+                expense.getAmount(),
+                LedgerTransactionType.DEBIT,
+                LedgerPaymentMode.fromLegacyPaymentMethod(expense.getPaymentMethod()),
+                LedgerSources.LOAN_REPAY,
+                expense.getId(),
+                expense.getDescription() != null ? expense.getDescription() : "Loan repayment");
     }
 
     public Optional<Long> findLenderIdForExpense(Long expenseId) {

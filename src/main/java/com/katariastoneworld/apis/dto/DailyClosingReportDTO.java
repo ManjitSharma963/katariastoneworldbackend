@@ -66,7 +66,7 @@ public class DailyClosingReportDTO {
     /** Absolute difference between sum(paymentSummary) and totalCollected (for support; should be ~0). */
     private Double collectionsReconciliationDelta;
 
-    /** Sum of expenses ({@code expenses.date}) for location on {@code date}. */
+    /** Sum of expenses ({@code expenses.expense_date}) for location on {@code date}. */
     private Double totalExpenses;
 
     /**
@@ -103,7 +103,13 @@ public class DailyClosingReportDTO {
     @Builder.Default
     private List<DailyClosingBillLineDTO> bills = new ArrayList<>();
 
-    /** Expense rows for {@code expenses.date = date} at this location (today's expenses list). */
+    /** Expense rows for {@code expenses.expense_date = date} at this location (today's expenses list). */
     @Builder.Default
     private List<DailyClosingExpenseLineDTO> expenseLines = new ArrayList<>();
+
+    /** Drill-down analytics: top customers/products, largest dues, and payment delay signals. */
+    private DailyClosingDrillDownDTO drillDown;
+
+    /** Business cash-flow view: Opening + Sales Collection + Advance Received - Expenses = Closing Balance. */
+    private DailyCashFlowDTO cashFlow;
 }

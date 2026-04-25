@@ -19,6 +19,8 @@ public class ProductResponseDTO {
     private String color;
     private Double pricePerUnit; // Generic: can be per sqft, per piece, per set, etc.
     private Double quantity; // Generic: can be sqft, count, etc.
+    /** Low-stock alert threshold (on-hand). */
+    private Double minStock;
     private String unit; // e.g., "sqft", "piece", "set", "pair", etc.
     private String primaryImageUrl;
     private String description;

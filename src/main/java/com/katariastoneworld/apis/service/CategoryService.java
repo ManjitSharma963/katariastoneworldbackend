@@ -96,6 +96,41 @@ public class CategoryService {
         Category savedCategory = categoryRepository.save(category);
         return convertToDTO(savedCategory);
     }
+
+    public CategoryResponseDTO updateCategory(Long id, CategoryRequestDTO requestDTO) {
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Category not found with id: " + id));
+
+        String categoryType = requestDTO.getCategoryType() != null
+                ? requestDTO.getCategoryType().trim()
+                : null;
+        if (categoryType == null || categoryType.isEmpty()) {
+            throw new RuntimeException("Category type is required");
+        }
+        String normalizedType = categoryType.toLowerCase();
+
+        Category duplicate = categoryRepository.findByNameAndCategoryTypeAndIdNot(
+                requestDTO.getName(), normalizedType, id);
+        if (duplicate != null) {
+            throw new RuntimeException("Category with name '" + requestDTO.getName() + "' and type '" + categoryType + "' already exists");
+        }
+
+        category.setName(requestDTO.getName());
+        category.setImageUrl(requestDTO.getImageUrl());
+        category.setCategoryType(normalizedType);
+        category.setDescription(requestDTO.getDescription());
+        category.setDisplayOrder(requestDTO.getDisplayOrder() != null ? requestDTO.getDisplayOrder() : 0);
+        category.setIsActive(requestDTO.getIsActive() != null ? requestDTO.getIsActive() : true);
+
+        Category updatedCategory = categoryRepository.save(category);
+        return convertToDTO(updatedCategory);
+    }
+
+    public void deleteCategory(Long id) {
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Category not found with id: " + id));
+        categoryRepository.delete(category);
+    }
     
     private CategoryResponseDTO convertToDTO(Category category) {
         CategoryResponseDTO dto = new CategoryResponseDTO();

@@ -50,6 +50,14 @@ public class Product {
     @PositiveOrZero(message = "Quantity must be positive or zero")
     @Column(name = "total_sqft_stock", nullable = false, precision = 10, scale = 2)
     private BigDecimal quantity; // Generic: can be sqft, count, etc.
+
+    /** Cached low-stock alert threshold (on-hand quantity). */
+    @Column(name = "min_stock", precision = 14, scale = 2)
+    private BigDecimal minStock;
+
+    /** Optional future warehouse/branch FK; nullable until locations table exists. */
+    @Column(name = "location_id")
+    private Long locationId;
     
     @Column(length = 50)
     private String unit; // e.g., "sqft", "piece", "set", "pair", etc. Defaults to "sqft" for backward compatibility

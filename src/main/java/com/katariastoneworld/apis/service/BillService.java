@@ -1,12 +1,32 @@
 package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.BillItemDTO;
+import com.katariastoneworld.apis.dto.BillLineQuantitiesPatchRequestDTO;
+import com.katariastoneworld.apis.dto.BillLineQuantityPatchLineDTO;
 import com.katariastoneworld.apis.dto.BillPaymentRequestDTO;
 import com.katariastoneworld.apis.dto.BillPaymentResponseDTO;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
-import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.dto.BillStockReturnLineRequestDTO;
+import com.katariastoneworld.apis.dto.BillStockReturnRequestDTO;
+import com.katariastoneworld.apis.dto.BillStockReturnResponseDTO;
+import com.katariastoneworld.apis.dto.BillCancellationLogDTO;
+import com.katariastoneworld.apis.entity.BillGST;
+import com.katariastoneworld.apis.entity.BillCancellationLog;
+import com.katariastoneworld.apis.entity.BillInventoryReturn;
+import com.katariastoneworld.apis.entity.BillInventoryReturnLine;
+import com.katariastoneworld.apis.entity.BillItemGST;
+import com.katariastoneworld.apis.entity.BillItemNonGST;
+import com.katariastoneworld.apis.entity.BillKind;
+import com.katariastoneworld.apis.entity.BillNonGST;
+import com.katariastoneworld.apis.entity.BillPayment;
+import com.katariastoneworld.apis.entity.BillPaymentMode;
+import com.katariastoneworld.apis.entity.Customer;
+import com.katariastoneworld.apis.entity.Product;
+import com.katariastoneworld.apis.repository.BillCancellationLogRepository;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
+import com.katariastoneworld.apis.repository.BillInventoryReturnLineRepository;
+import com.katariastoneworld.apis.repository.BillInventoryReturnRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,15 +38,19 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.time.temporal.ChronoUnit;
 
 @Service
 @Transactional
@@ -40,6 +64,7 @@ public class BillService {
      * full split details remain in {@code bill_payments}.
      */
     private static final int BILL_PAYMENT_METHOD_MAX_LEN = 50;
+    private static final long MAX_BACKDATE_DAYS = 7;
 
     private record ResolvedLine(BigDecimal amount, BillPaymentMode mode, LocalDate paymentDate) {
     }
@@ -72,9 +97,24 @@ public class BillService {
     private CustomerAdvanceService customerAdvanceService;
 
     @Autowired
+    private InventoryReservationService inventoryReservationService;
+
+    @Autowired
     private FinancialLedgerService financialLedgerService;
 
-    public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId) {
+    @Autowired
+    private BillInventoryReturnRepository billInventoryReturnRepository;
+
+    @Autowired
+    private BillInventoryReturnLineRepository billInventoryReturnLineRepository;
+
+    @Autowired
+    private DailyClosingSnapshotService dailyClosingSnapshotService;
+
+    @Autowired
+    private BillCancellationLogRepository billCancellationLogRepository;
+
+    public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId, String userRole) {
         // Get or create customer with details
         log.info("bill_create_start location={} createdBy={} items={}",
                 location, createdByUserId, billRequestDTO.getItems() != null ? billRequestDTO.getItems().size() : 0);
@@ -120,8 +160,7 @@ public class BillService {
         BigDecimal otherExpenses = billRequestDTO.getOtherExpenses() != null
                 ? BigDecimal.valueOf(billRequestDTO.getOtherExpenses()).setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO;
-        System.out.println("[Bill] Other expenses from request: raw=" + billRequestDTO.getOtherExpenses()
-                + ", applied=" + otherExpenses);
+        log.info("[Bill] Other expenses from request: raw={}, applied={}", billRequestDTO.getOtherExpenses(), otherExpenses);
 
         // Discount amount
         BigDecimal discountAmount = BigDecimal.valueOf(billRequestDTO.getDiscountAmount())
@@ -139,19 +178,478 @@ public class BillService {
             billNumber = billNumberGeneratorService.generateNonGSTBillNumber(location, createdByUserId);
         }
 
+        LocalDate effectiveBillDate = resolveRequestedBillDate(billRequestDTO, userRole);
+        boolean backdated = effectiveBillDate.isBefore(LocalDate.now());
         if (isGST) {
             return createGSTBill(billRequestDTO, customer, location, billNumber, totalSqft, subtotal,
-                    taxPercentage, serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount, createdByUserId);
+                    taxPercentage, serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount,
+                    createdByUserId, effectiveBillDate, backdated, userRole);
         } else {
             return createNonGSTBill(billRequestDTO, customer, location, billNumber, totalSqft, subtotal,
-                    serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount, createdByUserId);
+                    serviceCharge, labourCharge, transportationCharge, otherExpenses, discountAmount,
+                    createdByUserId, effectiveBillDate, backdated, userRole);
         }
+    }
+
+    public BillResponseDTO createSupplementaryBill(Long parentBillId, String parentBillType, BillRequestDTO billRequestDTO,
+            String location, Long createdByUserId, String userRole) {
+        if (parentBillId == null || parentBillType == null || parentBillType.isBlank()) {
+            throw new IllegalArgumentException("Parent bill id and type are required for supplementary bill");
+        }
+        BillKind parentKind = parseBillKind(parentBillType);
+        Customer parentCustomer;
+        if (parentKind == BillKind.GST) {
+            BillGST parent = billGSTRepository.findByIdWithItemsAndProducts(parentBillId)
+                    .orElseThrow(() -> new RuntimeException("Parent GST bill not found with id: " + parentBillId));
+            String parentLoc = resolveBillLocation(parent, parent.getCustomer());
+            if (!Objects.equals(parentLoc, location)) {
+                throw new RuntimeException("Parent GST bill not found with id: " + parentBillId);
+            }
+            parentCustomer = parent.getCustomer();
+        } else {
+            BillNonGST parent = billNonGSTRepository.findByIdWithItemsAndProducts(parentBillId)
+                    .orElseThrow(() -> new RuntimeException("Parent Non-GST bill not found with id: " + parentBillId));
+            String parentLoc = resolveBillLocation(parent, parent.getCustomer());
+            if (!Objects.equals(parentLoc, location)) {
+                throw new RuntimeException("Parent Non-GST bill not found with id: " + parentBillId);
+            }
+            parentCustomer = parent.getCustomer();
+        }
+        billRequestDTO.setCustomerMobileNumber(parentCustomer.getPhone());
+        if (billRequestDTO.getCustomerName() == null || billRequestDTO.getCustomerName().isBlank()) {
+            billRequestDTO.setCustomerName(parentCustomer.getCustomerName());
+        }
+        billRequestDTO.setParentBillId(parentBillId);
+        billRequestDTO.setParentBillType(parentKind.name());
+        return createBill(billRequestDTO, location, createdByUserId, userRole);
+    }
+
+    /**
+     * Replace an existing bill atomically (same bill id/number) with new header, items, and payment split.
+     * Stock, ledger, wallet-advance application, and daily closing snapshots are all recalculated from
+     * canonical transaction rows (single source of truth).
+     */
+    public BillResponseDTO replaceBill(Long billId, String billType, BillRequestDTO billRequestDTO,
+            String location, Long actorUserId, String userRole) {
+        BillKind kind = parseBillKind(billType);
+        if (kind == BillKind.GST) {
+            return replaceGstBill(billId, billRequestDTO, location, actorUserId, userRole);
+        }
+        return replaceNonGstBill(billId, billRequestDTO, location, actorUserId, userRole);
+    }
+
+    private BillResponseDTO replaceGstBill(Long billId, BillRequestDTO req, String location, Long actorUserId, String userRole) {
+        BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+        if (Boolean.TRUE.equals(bill.getIsDeleted())) {
+            throw new IllegalArgumentException("Cannot edit a deleted bill");
+        }
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("GST Bill not found with id: " + billId);
+        }
+        Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.GST, billId);
+        if (!returnedByLine.isEmpty()) {
+            throw new IllegalArgumentException("Cannot fully edit bill with stock returns. Use quantity patch/stock return flow.");
+        }
+
+        LocalDate oldBillDate = bill.getBillDate();
+        List<ResolvedLine> oldPayLines = resolvedNonAdvanceLinesForSnapshot(BillKind.GST, billId);
+        Customer oldCustomer = bill.getCustomer();
+
+        // Undo existing effects first.
+        inventoryReservationService.releaseForBill(billId, BillKind.GST);
+        revertStockForGstBill(bill, billLocation);
+        deactivateBillPayments(BillKind.GST, billId, billLocation, actorUserId);
+        customerAdvanceService.reverseAdvanceUsageForBill(BillKind.GST, billId);
+
+        Customer customer = customerService.getOrCreateCustomer(
+                req.getCustomerMobileNumber(),
+                req.getCustomerName(),
+                req.getAddress(),
+                req.getGstin(),
+                req.getCustomerEmail(),
+                billLocation,
+                actorUserId);
+        bill.setCustomer(customer);
+
+        BigDecimal totalSqft = req.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getQuantity()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal subtotal = req.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getPricePerUnit()).multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxRate = BigDecimal.valueOf(req.getTaxPercentage()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxAmount = subtotal.multiply(taxRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        BigDecimal labourCharge = req.getLabourCharge() != null
+                ? BigDecimal.valueOf(req.getLabourCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal transportationCharge = req.getTransportationCharge() != null
+                ? BigDecimal.valueOf(req.getTransportationCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal otherExpenses = req.getOtherExpenses() != null
+                ? BigDecimal.valueOf(req.getOtherExpenses()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal discountAmount = BigDecimal.valueOf(req.getDiscountAmount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalAmount = subtotal.add(taxAmount)
+                .add(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
+                .add(labourCharge)
+                .add(transportationCharge)
+                .add(otherExpenses)
+                .subtract(discountAmount);
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
+        }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+
+        LocalDate effectiveBillDate = resolveRequestedBillDate(req, userRole);
+        boolean backdated = effectiveBillDate.isBefore(LocalDate.now());
+        bill.setBillDate(effectiveBillDate);
+        bill.setBackdated(backdated);
+        bill.setBackdateReason(trimToNull(req.getBackdateReason()));
+        bill.setBackdateApprovedBy(trimToNull(req.getBackdateApprovedBy()));
+        bill.setSupplementaryBill(req.getParentBillId() != null);
+        bill.setParentBillId(req.getParentBillId());
+        bill.setParentBillType(normalizeParentBillType(req.getParentBillType()));
+        bill.setSupplementaryReason(trimToNull(req.getSupplementaryReason()));
+        bill.setTotalSqft(totalSqft);
+        bill.setSubtotal(subtotal);
+        bill.setTaxRate(taxRate);
+        bill.setTaxAmount(taxAmount);
+        bill.setServiceCharge(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        bill.setLabourCharge(labourCharge);
+        bill.setTransportationCharge(transportationCharge);
+        bill.setOtherExpenses(otherExpenses);
+        bill.setDiscountAmount(discountAmount);
+        bill.setTotalAmount(totalAmount);
+        bill.setVehicleNo(trimToNull(req.getVehicleNo()));
+        bill.setDeliveryAddress(trimToNull(req.getDeliveryAddress()));
+        bill.setUpdatedByUserId(actorUserId);
+        bill.setPaymentStatus(BillGST.PaymentStatus.DUE);
+        bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        bill.setPaymentMethod("-");
+
+        Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
+        Map<String, BigDecimal> productQuantitiesByName = new HashMap<>();
+        for (BillItemDTO itemDTO : req.getItems()) {
+            BigDecimal quantity = BigDecimal.valueOf(itemDTO.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+            if (itemDTO.getProductId() != null) {
+                productQuantitiesById.merge(itemDTO.getProductId(), quantity, BigDecimal::add);
+            } else if (itemDTO.getItemName() != null) {
+                productQuantitiesByName.merge(itemDTO.getItemName(), quantity, BigDecimal::add);
+            }
+        }
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.validateStockAvailability(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.validateStockAvailabilityByName(entry.getKey(), entry.getValue());
+        }
+
+        bill.getItems().clear();
+        String firstInventoryHsn = null;
+        for (BillItemDTO itemDTO : req.getItems()) {
+            BillItemGST item = new BillItemGST();
+            item.setProductName(itemDTO.getItemName());
+            item.setProductType(itemDTO.getCategory());
+            item.setPricePerUnit(BigDecimal.valueOf(itemDTO.getPricePerUnit()).setScale(2, RoundingMode.HALF_UP));
+            item.setQuantity(BigDecimal.valueOf(itemDTO.getQuantity()).setScale(2, RoundingMode.HALF_UP));
+            item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
+                    .setScale(2, RoundingMode.HALF_UP));
+            if (itemDTO.getProductImageUrl() != null) {
+                item.setProductImageUrl(itemDTO.getProductImageUrl());
+            }
+            Product product = null;
+            if (itemDTO.getProductId() != null) {
+                product = productService.getProductEntityById(itemDTO.getProductId());
+                item.setProduct(product);
+            } else if (itemDTO.getItemName() != null) {
+                try {
+                    product = productService.getProductEntityByName(itemDTO.getItemName());
+                    item.setProduct(product);
+                } catch (RuntimeException ignored) {
+                }
+            }
+            if (product != null && product.getHsnNumber() != null && !product.getHsnNumber().isBlank()) {
+                String invHsn = product.getHsnNumber().trim();
+                item.setHsnNumber(invHsn);
+                if (firstInventoryHsn == null) {
+                    firstInventoryHsn = invHsn;
+                }
+            }
+            if (product != null && product.getUnit() != null && !product.getUnit().trim().isEmpty()) {
+                item.setUnit(product.getUnit());
+            } else if (itemDTO.getUnit() != null && !itemDTO.getUnit().trim().isEmpty()) {
+                item.setUnit(itemDTO.getUnit());
+            } else {
+                item.setUnit("sqft");
+            }
+            bill.addItem(item);
+        }
+        String billHsnFromRequest = trimToNull(req.getHsnCode());
+        bill.setHsnCode(billHsnFromRequest != null ? billHsnFromRequest : firstInventoryHsn);
+        billGSTRepository.save(bill);
+
+        BigDecimal advanceApplied = customerAdvanceService.applyAdvanceFifo(customer.getId(), BillKind.GST, bill.getId(), totalAmount);
+        persistWalletAdvancePayment(BillKind.GST, bill.getId(), advanceApplied, bill.getBillDate(), actorUserId);
+        BigDecimal netForPayments = totalAmount.subtract(advanceApplied).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        List<ResolvedLine> payLines = resolvePaymentLines(req, netForPayments, bill.getBillDate(), userRole);
+        BigDecimal totalPaid = sumResolvedLines(payLines);
+        BigDecimal covered = advanceApplied.add(totalPaid);
+        bill.setPaidAmount(totalPaid);
+        bill.setPaymentStatus(toGstPaymentStatus(totalAmount, covered));
+        bill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaid, advanceApplied));
+        billGSTRepository.save(bill);
+
+        inventoryReservationService.releaseForBill(bill.getId(), BillKind.GST);
+        inventoryReservationService.reserveForBill(
+                bill.getId(), BillKind.GST, productQuantitiesById, productQuantitiesByName, billLocation);
+        try {
+            String note = "Stock deducted via edited GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
+            LocalDate stockDate = bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now();
+            for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+                productService.deductStock(entry.getKey(), entry.getValue(), bill.getId(), note, BillKind.GST, stockDate);
+            }
+            for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+                productService.deductStockByName(entry.getKey(), entry.getValue(), bill.getId(), note, BillKind.GST, stockDate);
+            }
+            inventoryReservationService.consumeForBill(bill.getId(), BillKind.GST);
+        } catch (RuntimeException ex) {
+            inventoryReservationService.releaseForBill(bill.getId(), BillKind.GST);
+            throw ex;
+        }
+
+        persistResolvedPayments(BillKind.GST, bill.getId(), payLines, billLocation);
+        Set<LocalDate> extraImpacted = new HashSet<>();
+        if (oldBillDate != null) {
+            extraImpacted.add(oldBillDate);
+        }
+        if (bill.getBillDate() != null) {
+            extraImpacted.add(bill.getBillDate());
+        }
+        List<ResolvedLine> allImpactedLines = new ArrayList<>(oldPayLines);
+        allImpactedLines.addAll(payLines);
+        recomputeSnapshotsForBillMutation(billLocation, bill.getBillDate(), allImpactedLines, extraImpacted);
+
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
+        BillResponseDTO response = convertGSTToResponseDTO(
+                bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId()),
+                adv);
+        boolean isSimpleBill = (req.getSimpleBill() != null && req.getSimpleBill())
+                || (req.getTaxPercentage() != null && req.getTaxPercentage() == 0);
+        response.setSimpleBill(isSimpleBill);
+        if (oldCustomer != null && oldCustomer.getEmail() != null && !oldCustomer.getEmail().isBlank()) {
+            emailService.sendBillEmail(response, oldCustomer.getEmail());
+        } else if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
+            emailService.sendBillEmail(response, customer.getEmail());
+        }
+        return response;
+    }
+
+    private BillResponseDTO replaceNonGstBill(Long billId, BillRequestDTO req, String location, Long actorUserId, String userRole) {
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        if (Boolean.TRUE.equals(bill.getIsDeleted())) {
+            throw new IllegalArgumentException("Cannot edit a deleted bill");
+        }
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.NON_GST, billId);
+        if (!returnedByLine.isEmpty()) {
+            throw new IllegalArgumentException("Cannot fully edit bill with stock returns. Use quantity patch/stock return flow.");
+        }
+
+        LocalDate oldBillDate = bill.getBillDate();
+        List<ResolvedLine> oldPayLines = resolvedNonAdvanceLinesForSnapshot(BillKind.NON_GST, billId);
+        Customer oldCustomer = bill.getCustomer();
+
+        inventoryReservationService.releaseForBill(billId, BillKind.NON_GST);
+        revertStockForNonGstBill(bill, billLocation);
+        deactivateBillPayments(BillKind.NON_GST, billId, billLocation, actorUserId);
+        customerAdvanceService.reverseAdvanceUsageForBill(BillKind.NON_GST, billId);
+
+        Customer customer = customerService.getOrCreateCustomer(
+                req.getCustomerMobileNumber(),
+                req.getCustomerName(),
+                req.getAddress(),
+                req.getGstin(),
+                req.getCustomerEmail(),
+                billLocation,
+                actorUserId);
+        bill.setCustomer(customer);
+
+        BigDecimal totalSqft = req.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getQuantity()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal subtotal = req.getItems().stream()
+                .map(item -> BigDecimal.valueOf(item.getPricePerUnit()).multiply(BigDecimal.valueOf(item.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal labourCharge = req.getLabourCharge() != null
+                ? BigDecimal.valueOf(req.getLabourCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal transportationCharge = req.getTransportationCharge() != null
+                ? BigDecimal.valueOf(req.getTransportationCharge()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal otherExpenses = req.getOtherExpenses() != null
+                ? BigDecimal.valueOf(req.getOtherExpenses()).setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal discountAmount = BigDecimal.valueOf(req.getDiscountAmount()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalAmount = subtotal
+                .add(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
+                .add(labourCharge)
+                .add(transportationCharge)
+                .add(otherExpenses)
+                .subtract(discountAmount);
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
+        }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+
+        LocalDate effectiveBillDate = resolveRequestedBillDate(req, userRole);
+        boolean backdated = effectiveBillDate.isBefore(LocalDate.now());
+        bill.setBillDate(effectiveBillDate);
+        bill.setBackdated(backdated);
+        bill.setBackdateReason(trimToNull(req.getBackdateReason()));
+        bill.setBackdateApprovedBy(trimToNull(req.getBackdateApprovedBy()));
+        bill.setSupplementaryBill(req.getParentBillId() != null);
+        bill.setParentBillId(req.getParentBillId());
+        bill.setParentBillType(normalizeParentBillType(req.getParentBillType()));
+        bill.setSupplementaryReason(trimToNull(req.getSupplementaryReason()));
+        bill.setTotalSqft(totalSqft);
+        bill.setSubtotal(subtotal);
+        bill.setServiceCharge(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        bill.setLabourCharge(labourCharge);
+        bill.setTransportationCharge(transportationCharge);
+        bill.setOtherExpenses(otherExpenses);
+        bill.setDiscountAmount(discountAmount);
+        bill.setTotalAmount(totalAmount);
+        bill.setUpdatedByUserId(actorUserId);
+        bill.setPaymentStatus(BillNonGST.PaymentStatus.DUE);
+        bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        bill.setPaymentMethod("-");
+
+        Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
+        Map<String, BigDecimal> productQuantitiesByName = new HashMap<>();
+        for (BillItemDTO itemDTO : req.getItems()) {
+            BigDecimal quantity = BigDecimal.valueOf(itemDTO.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+            if (itemDTO.getProductId() != null) {
+                productQuantitiesById.merge(itemDTO.getProductId(), quantity, BigDecimal::add);
+            } else if (itemDTO.getItemName() != null) {
+                productQuantitiesByName.merge(itemDTO.getItemName(), quantity, BigDecimal::add);
+            }
+        }
+        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+            productService.validateStockAvailability(entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+            productService.validateStockAvailabilityByName(entry.getKey(), entry.getValue());
+        }
+
+        bill.getItems().clear();
+        for (BillItemDTO itemDTO : req.getItems()) {
+            BillItemNonGST item = new BillItemNonGST();
+            item.setProductName(itemDTO.getItemName());
+            item.setProductType(itemDTO.getCategory());
+            item.setPricePerUnit(BigDecimal.valueOf(itemDTO.getPricePerUnit()).setScale(2, RoundingMode.HALF_UP));
+            item.setQuantity(BigDecimal.valueOf(itemDTO.getQuantity()).setScale(2, RoundingMode.HALF_UP));
+            item.setItemTotalPrice(BigDecimal.valueOf(itemDTO.getPricePerUnit())
+                    .multiply(BigDecimal.valueOf(itemDTO.getQuantity()))
+                    .setScale(2, RoundingMode.HALF_UP));
+            if (itemDTO.getProductImageUrl() != null) {
+                item.setProductImageUrl(itemDTO.getProductImageUrl());
+            }
+            Product product = null;
+            if (itemDTO.getProductId() != null) {
+                product = productService.getProductEntityById(itemDTO.getProductId());
+                item.setProduct(product);
+            } else if (itemDTO.getItemName() != null) {
+                try {
+                    product = productService.getProductEntityByName(itemDTO.getItemName());
+                    item.setProduct(product);
+                } catch (RuntimeException ignored) {
+                }
+            }
+            if (product != null && product.getUnit() != null && !product.getUnit().trim().isEmpty()) {
+                item.setUnit(product.getUnit());
+            } else if (itemDTO.getUnit() != null && !itemDTO.getUnit().trim().isEmpty()) {
+                item.setUnit(itemDTO.getUnit());
+            } else {
+                item.setUnit("sqft");
+            }
+            bill.addItem(item);
+        }
+        billNonGSTRepository.save(bill);
+
+        BigDecimal advanceApplied = customerAdvanceService.applyAdvanceFifo(customer.getId(), BillKind.NON_GST, bill.getId(), totalAmount);
+        persistWalletAdvancePayment(BillKind.NON_GST, bill.getId(), advanceApplied, bill.getBillDate(), actorUserId);
+        BigDecimal netForPayments = totalAmount.subtract(advanceApplied).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        List<ResolvedLine> payLines = resolvePaymentLines(req, netForPayments, bill.getBillDate(), userRole);
+        BigDecimal totalPaid = sumResolvedLines(payLines);
+        BigDecimal covered = advanceApplied.add(totalPaid);
+        bill.setPaidAmount(totalPaid);
+        bill.setPaymentStatus(toNonGstPaymentStatus(totalAmount, covered));
+        bill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaid, advanceApplied));
+        billNonGSTRepository.save(bill);
+
+        inventoryReservationService.releaseForBill(bill.getId(), BillKind.NON_GST);
+        inventoryReservationService.reserveForBill(
+                bill.getId(), BillKind.NON_GST, productQuantitiesById, productQuantitiesByName, billLocation);
+        try {
+            String note = "Stock deducted via edited Non-GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
+            LocalDate stockDate = bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now();
+            for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+                productService.deductStock(entry.getKey(), entry.getValue(), bill.getId(), note, BillKind.NON_GST, stockDate);
+            }
+            for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+                productService.deductStockByName(entry.getKey(), entry.getValue(), bill.getId(), note, BillKind.NON_GST, stockDate);
+            }
+            inventoryReservationService.consumeForBill(bill.getId(), BillKind.NON_GST);
+        } catch (RuntimeException ex) {
+            inventoryReservationService.releaseForBill(bill.getId(), BillKind.NON_GST);
+            throw ex;
+        }
+
+        persistResolvedPayments(BillKind.NON_GST, bill.getId(), payLines, billLocation);
+        Set<LocalDate> extraImpacted = new HashSet<>();
+        if (oldBillDate != null) {
+            extraImpacted.add(oldBillDate);
+        }
+        if (bill.getBillDate() != null) {
+            extraImpacted.add(bill.getBillDate());
+        }
+        List<ResolvedLine> allImpactedLines = new ArrayList<>(oldPayLines);
+        allImpactedLines.addAll(payLines);
+        recomputeSnapshotsForBillMutation(billLocation, bill.getBillDate(), allImpactedLines, extraImpacted);
+
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
+        BillResponseDTO response = convertNonGSTToResponseDTO(
+                bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, bill.getId()),
+                adv);
+        boolean isSimpleBill = (req.getSimpleBill() != null && req.getSimpleBill())
+                || (req.getTaxPercentage() != null && req.getTaxPercentage() == 0);
+        response.setSimpleBill(isSimpleBill);
+        if (oldCustomer != null && oldCustomer.getEmail() != null && !oldCustomer.getEmail().isBlank()) {
+            emailService.sendBillEmail(response, oldCustomer.getEmail());
+        } else if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
+            emailService.sendBillEmail(response, customer.getEmail());
+        }
+        return response;
     }
 
     private BillResponseDTO createGSTBill(BillRequestDTO billRequestDTO, Customer customer, String location,
             String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
             BigDecimal taxRate, BigDecimal serviceCharge, BigDecimal labourCharge,
-            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId) {
+            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId,
+            LocalDate effectiveBillDate, boolean backdated, String userRole) {
         // Calculate tax amount
         BigDecimal taxAmount = subtotal.multiply(taxRate)
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
@@ -170,7 +668,14 @@ public class BillService {
         bill.setBillNumber(billNumber);
         bill.setCustomer(customer);
         bill.setLocation(location != null ? location.trim() : null);
-        bill.setBillDate(LocalDate.now());
+        bill.setBillDate(effectiveBillDate);
+        bill.setBackdated(backdated);
+        bill.setBackdateReason(trimToNull(billRequestDTO.getBackdateReason()));
+        bill.setBackdateApprovedBy(trimToNull(billRequestDTO.getBackdateApprovedBy()));
+        bill.setSupplementaryBill(billRequestDTO.getParentBillId() != null);
+        bill.setParentBillId(billRequestDTO.getParentBillId());
+        bill.setParentBillType(normalizeParentBillType(billRequestDTO.getParentBillType()));
+        bill.setSupplementaryReason(trimToNull(billRequestDTO.getSupplementaryReason()));
         bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
         bill.setSubtotal(subtotal);
         bill.setTaxRate(taxRate);
@@ -187,8 +692,7 @@ public class BillService {
         bill.setVehicleNo(trimToNull(billRequestDTO.getVehicleNo()));
         bill.setDeliveryAddress(trimToNull(billRequestDTO.getDeliveryAddress()));
         bill.setCreatedByUserId(createdByUserId);
-        System.out.println("[Bill GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
-                + ", totalAmount=" + totalAmount);
+        log.info("[Bill GST] Bill {} created with otherExpenses={}, totalAmount={}", billNumber, otherExpenses, totalAmount);
 
         // Group items by productId and sum quantities for efficient stock validation
         Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
@@ -280,8 +784,9 @@ public class BillService {
 
         BigDecimal advanceApplied = customerAdvanceService.applyAdvanceFifo(
                 customer.getId(), BillKind.GST, savedBill.getId(), totalAmount);
+        persistWalletAdvancePayment(BillKind.GST, savedBill.getId(), advanceApplied, savedBill.getBillDate(), createdByUserId);
         BigDecimal netForPayments = totalAmount.subtract(advanceApplied).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate());
+        List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate(), userRole);
         BigDecimal totalPaidCash = sumResolvedLines(payLines);
         BigDecimal covered = advanceApplied.add(totalPaidCash);
         savedBill.setPaidAmount(totalPaidCash.setScale(2, RoundingMode.HALF_UP));
@@ -289,18 +794,25 @@ public class BillService {
         savedBill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaidCash, advanceApplied));
         billGSTRepository.save(savedBill);
 
-        // Deduct stock from products after bill is saved (grouped by productId)
-        String gstBillNote = "Stock deducted via GST bill " + savedBill.getBillNumber() + " (id=" + savedBill.getId() + ")";
-        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
-            productService.deductStock(entry.getKey(), entry.getValue(), savedBill.getId(), gstBillNote);
-        }
-
-        // Deduct stock from products after bill is saved (grouped by product name)
-        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
-            productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), gstBillNote);
+        inventoryReservationService.reserveForBill(
+                savedBill.getId(), BillKind.GST, productQuantitiesById, productQuantitiesByName, location);
+        try {
+            String gstBillNote = "Stock deducted via GST bill " + savedBill.getBillNumber() + " (id=" + savedBill.getId() + ")";
+            LocalDate stockDate = savedBill.getBillDate() != null ? savedBill.getBillDate() : LocalDate.now();
+            for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+                productService.deductStock(entry.getKey(), entry.getValue(), savedBill.getId(), gstBillNote, BillKind.GST, stockDate);
+            }
+            for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+                productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), gstBillNote, BillKind.GST, stockDate);
+            }
+            inventoryReservationService.consumeForBill(savedBill.getId(), BillKind.GST);
+        } catch (RuntimeException ex) {
+            inventoryReservationService.releaseForBill(savedBill.getId(), BillKind.GST);
+            throw ex;
         }
 
         persistResolvedPayments(BillKind.GST, savedBill.getId(), payLines, resolveBillLocation(savedBill, customer));
+        recomputeSnapshotsForBillMutation(resolveBillLocation(savedBill, customer), savedBill.getBillDate(), payLines);
 
         // Convert to response DTO
         BillResponseDTO responseDTO = convertGSTToResponseDTO(savedBill,
@@ -323,7 +835,8 @@ public class BillService {
     private BillResponseDTO createNonGSTBill(BillRequestDTO billRequestDTO, Customer customer, String location,
             String billNumber, BigDecimal totalSqft, BigDecimal subtotal,
             BigDecimal serviceCharge, BigDecimal labourCharge,
-            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId) {
+            BigDecimal transportationCharge, BigDecimal otherExpenses, BigDecimal discountAmount, Long createdByUserId,
+            LocalDate effectiveBillDate, boolean backdated, String userRole) {
         // Always calculate total amount (no tax) to include all charges: subtotal +
         // serviceCharge + labourCharge + transportationCharge + otherExpenses - discountAmount
         BigDecimal totalAmount = subtotal.add(serviceCharge).add(labourCharge)
@@ -338,7 +851,14 @@ public class BillService {
         bill.setBillNumber(billNumber);
         bill.setCustomer(customer);
         bill.setLocation(location != null ? location.trim() : null);
-        bill.setBillDate(LocalDate.now());
+        bill.setBillDate(effectiveBillDate);
+        bill.setBackdated(backdated);
+        bill.setBackdateReason(trimToNull(billRequestDTO.getBackdateReason()));
+        bill.setBackdateApprovedBy(trimToNull(billRequestDTO.getBackdateApprovedBy()));
+        bill.setSupplementaryBill(billRequestDTO.getParentBillId() != null);
+        bill.setParentBillId(billRequestDTO.getParentBillId());
+        bill.setParentBillType(normalizeParentBillType(billRequestDTO.getParentBillType()));
+        bill.setSupplementaryReason(trimToNull(billRequestDTO.getSupplementaryReason()));
         bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
         bill.setSubtotal(subtotal);
         bill.setServiceCharge(serviceCharge);
@@ -350,8 +870,7 @@ public class BillService {
         bill.setPaymentStatus(BillNonGST.PaymentStatus.DUE);
         bill.setPaymentMethod("-");
         bill.setCreatedByUserId(createdByUserId);
-        System.out.println("[Bill Non-GST] Bill " + billNumber + " created with otherExpenses=" + otherExpenses
-                + ", totalAmount=" + totalAmount);
+        log.info("[Bill Non-GST] Bill {} created with otherExpenses={}, totalAmount={}", billNumber, otherExpenses, totalAmount);
 
         // Group items by productId and sum quantities for efficient stock validation
         Map<Long, BigDecimal> productQuantitiesById = new HashMap<>();
@@ -431,8 +950,9 @@ public class BillService {
 
         BigDecimal advanceApplied = customerAdvanceService.applyAdvanceFifo(
                 customer.getId(), BillKind.NON_GST, savedBill.getId(), totalAmount);
+        persistWalletAdvancePayment(BillKind.NON_GST, savedBill.getId(), advanceApplied, savedBill.getBillDate(), createdByUserId);
         BigDecimal netForPayments = totalAmount.subtract(advanceApplied).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate());
+        List<ResolvedLine> payLines = resolvePaymentLines(billRequestDTO, netForPayments, savedBill.getBillDate(), userRole);
         BigDecimal totalPaidCash = sumResolvedLines(payLines);
         BigDecimal covered = advanceApplied.add(totalPaidCash);
         savedBill.setPaidAmount(totalPaidCash.setScale(2, RoundingMode.HALF_UP));
@@ -440,18 +960,25 @@ public class BillService {
         savedBill.setPaymentMethod(buildPaymentMethodSummary(payLines, totalAmount, totalPaidCash, advanceApplied));
         billNonGSTRepository.save(savedBill);
 
-        // Deduct stock from products after bill is saved (grouped by productId)
-        String nonGstBillNote = "Stock deducted via Non-GST bill " + savedBill.getBillNumber() + " (id=" + savedBill.getId() + ")";
-        for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
-            productService.deductStock(entry.getKey(), entry.getValue(), savedBill.getId(), nonGstBillNote);
-        }
-
-        // Deduct stock from products after bill is saved (grouped by product name)
-        for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
-            productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), nonGstBillNote);
+        inventoryReservationService.reserveForBill(
+                savedBill.getId(), BillKind.NON_GST, productQuantitiesById, productQuantitiesByName, location);
+        try {
+            String nonGstBillNote = "Stock deducted via Non-GST bill " + savedBill.getBillNumber() + " (id=" + savedBill.getId() + ")";
+            LocalDate stockDate = savedBill.getBillDate() != null ? savedBill.getBillDate() : LocalDate.now();
+            for (Map.Entry<Long, BigDecimal> entry : productQuantitiesById.entrySet()) {
+                productService.deductStock(entry.getKey(), entry.getValue(), savedBill.getId(), nonGstBillNote, BillKind.NON_GST, stockDate);
+            }
+            for (Map.Entry<String, BigDecimal> entry : productQuantitiesByName.entrySet()) {
+                productService.deductStockByName(entry.getKey(), entry.getValue(), savedBill.getId(), nonGstBillNote, BillKind.NON_GST, stockDate);
+            }
+            inventoryReservationService.consumeForBill(savedBill.getId(), BillKind.NON_GST);
+        } catch (RuntimeException ex) {
+            inventoryReservationService.releaseForBill(savedBill.getId(), BillKind.NON_GST);
+            throw ex;
         }
 
         persistResolvedPayments(BillKind.NON_GST, savedBill.getId(), payLines, resolveBillLocation(savedBill, customer));
+        recomputeSnapshotsForBillMutation(resolveBillLocation(savedBill, customer), savedBill.getBillDate(), payLines);
 
         // Convert to response DTO
         BillResponseDTO responseDTO = convertNonGSTToResponseDTO(savedBill,
@@ -490,8 +1017,7 @@ public class BillService {
                 throw new RuntimeException("GST Bill not found with id: " + billId);
             }
             List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId);
-            BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal paid = sumNonAdvancePayments(existing);
             BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId)
                     .setScale(2, RoundingMode.HALF_UP);
             BigDecimal remaining = bill.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
@@ -502,6 +1028,7 @@ public class BillService {
             BillPayment row = new BillPayment();
             row.setBillKind(BillKind.GST);
             row.setBillId(billId);
+            row.setSourceType("BILL_PAYMENT");
             row.setAmount(amount);
             row.setPaymentMode(mode);
             row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : LocalDate.now());
@@ -512,6 +1039,7 @@ public class BillService {
                     saved.getAmount(), saved.getPaymentDate(), true);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, null);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
                     updatedAdv);
         }
@@ -523,8 +1051,7 @@ public class BillService {
             throw new RuntimeException("NonGST Bill not found with id: " + billId);
         }
         List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId);
-        BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = sumNonAdvancePayments(existing);
         BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId)
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal remaining = bill.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
@@ -535,6 +1062,7 @@ public class BillService {
         BillPayment row = new BillPayment();
         row.setBillKind(BillKind.NON_GST);
         row.setBillId(billId);
+        row.setSourceType("BILL_PAYMENT");
         row.setAmount(amount);
         row.setPaymentMode(mode);
         row.setPaymentDate(paymentRequest.getPaymentDate() != null ? paymentRequest.getPaymentDate() : LocalDate.now());
@@ -545,6 +1073,7 @@ public class BillService {
                 saved.getAmount(), saved.getPaymentDate(), true);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, null);
         return convertNonGSTToResponseDTO(bill,
                 billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
     }
@@ -557,6 +1086,10 @@ public class BillService {
         BillKind kind = "GST".equalsIgnoreCase(billType) ? BillKind.GST : BillKind.NON_GST;
         BillPayment row = billPaymentRepository.findByIdAndBillKindAndBillId(paymentId, kind, billId)
                 .orElseThrow(() -> new RuntimeException("Payment not found with id: " + paymentId));
+        if (isAdvancePayment(row)) {
+            throw new IllegalArgumentException("Wallet advance row cannot be edited");
+        }
+        LocalDate oldPaymentDate = row.getPaymentDate();
         BigDecimal oldAmount = row.getAmount() != null ? row.getAmount().setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BillPaymentMode newMode = parseBillPaymentMode(paymentRequest.getPaymentMode());
@@ -570,8 +1103,7 @@ public class BillService {
                 throw new RuntimeException("GST Bill not found with id: " + billId);
             }
             List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId);
-            BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal paid = sumNonAdvancePayments(existing);
             BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId).setScale(2, RoundingMode.HALF_UP);
             BigDecimal remainingExcludingThis = bill.getTotalAmount().subtract(adv).subtract(paid).add(oldAmount)
                     .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
@@ -587,6 +1119,12 @@ public class BillService {
                     saved.getAmount(), saved.getPaymentDate(), true);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            Set<LocalDate> extra = null;
+            if (oldPaymentDate != null && saved.getPaymentDate() != null && !oldPaymentDate.equals(saved.getPaymentDate())) {
+                extra = new HashSet<>();
+                extra.add(oldPaymentDate);
+            }
+            recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, extra);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
                     updatedAdv);
         }
@@ -598,8 +1136,7 @@ public class BillService {
             throw new RuntimeException("NonGST Bill not found with id: " + billId);
         }
         List<BillPayment> existing = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId);
-        BigDecimal paid = existing.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = sumNonAdvancePayments(existing);
         BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId).setScale(2, RoundingMode.HALF_UP);
         BigDecimal remainingExcludingThis = bill.getTotalAmount().subtract(adv).subtract(paid).add(oldAmount)
                 .max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
@@ -615,6 +1152,12 @@ public class BillService {
                 saved.getAmount(), saved.getPaymentDate(), true);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        Set<LocalDate> extra = null;
+        if (oldPaymentDate != null && saved.getPaymentDate() != null && !oldPaymentDate.equals(saved.getPaymentDate())) {
+            extra = new HashSet<>();
+            extra.add(oldPaymentDate);
+        }
+        recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, extra);
         return convertNonGSTToResponseDTO(bill,
                 billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
     }
@@ -623,6 +1166,9 @@ public class BillService {
         BillKind kind = "GST".equalsIgnoreCase(billType) ? BillKind.GST : BillKind.NON_GST;
         BillPayment row = billPaymentRepository.findByIdAndBillKindAndBillId(paymentId, kind, billId)
                 .orElseThrow(() -> new RuntimeException("Payment not found with id: " + paymentId));
+        if (isAdvancePayment(row)) {
+            throw new IllegalArgumentException("Wallet advance row cannot be deleted");
+        }
 
         if (kind == BillKind.GST) {
             BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
@@ -638,6 +1184,8 @@ public class BillService {
                     saved.getAmount(), saved.getPaymentDate(), false);
             refreshBillFinancialsGST(bill, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            Set<LocalDate> extra = saved.getPaymentDate() != null ? Set.of(saved.getPaymentDate()) : null;
+            recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, extra);
             return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId),
                     updatedAdv);
         }
@@ -655,13 +1203,236 @@ public class BillService {
                 saved.getAmount(), saved.getPaymentDate(), false);
         refreshBillFinancialsNonGST(bill, billLocation);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        Set<LocalDate> extra = saved.getPaymentDate() != null ? Set.of(saved.getPaymentDate()) : null;
+        recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, extra);
         return convertNonGSTToResponseDTO(bill,
                 billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), updatedAdv);
     }
 
     /**
+     * Record a partial physical stock return against an existing bill. Persists return lines (caps per line)
+     * and appends {@code RETURN} / {@code IN} inventory transactions tied to this bill id.
+     */
+    public BillStockReturnResponseDTO recordPartialStockReturn(Long billId, String billType,
+            BillStockReturnRequestDTO request, String location, Long actorUserId) {
+        if (request == null || request.getLines() == null || request.getLines().isEmpty()) {
+            throw new IllegalArgumentException("At least one return line is required");
+        }
+        Set<Long> seen = new HashSet<>();
+        for (BillStockReturnLineRequestDTO ln : request.getLines()) {
+            if (ln.getBillItemId() == null || !seen.add(ln.getBillItemId())) {
+                throw new IllegalArgumentException("Each billItemId must appear once and be non-null");
+            }
+        }
+        if ("GST".equalsIgnoreCase(billType)) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            String billLocation = resolveBillLocation(bill, bill.getCustomer());
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            Map<Long, BigDecimal> returnedBefore = loadReturnedByLineId(BillKind.GST, billId);
+            BillInventoryReturn header = new BillInventoryReturn();
+            header.setBillKind(BillKind.GST);
+            header.setBillId(billId);
+            header.setLocation(location != null ? location.trim() : null);
+            header.setNotes(request.getNotes());
+            header.setCreatedByUserId(actorUserId);
+            for (BillStockReturnLineRequestDTO ln : request.getLines()) {
+                BillItemGST line = findGstLine(bill, ln.getBillItemId());
+                BigDecimal sold = line.getQuantity() != null ? line.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                BigDecimal already = returnedBefore.getOrDefault(line.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal q = BigDecimal.valueOf(ln.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+                if (q.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException("Return quantity must be positive");
+                }
+                if (already.add(q).subtract(sold).compareTo(PAY_ROUND_EPS) > 0) {
+                    throw new IllegalArgumentException(
+                            "Return exceeds remaining for line item id=" + line.getId() + ": sold=" + sold + ", already returned="
+                                    + already + ", this return=" + q);
+                }
+                BillInventoryReturnLine rl = new BillInventoryReturnLine();
+                rl.setBillItemId(line.getId());
+                rl.setQuantityReturned(q);
+                header.addLine(rl);
+            }
+            BillInventoryReturn saved = billInventoryReturnRepository.save(header);
+            String noteBase = "Partial stock return id=" + saved.getId() + " for GST bill " + bill.getBillNumber() + " (bill id="
+                    + bill.getId() + ")";
+            for (BillInventoryReturnLine rl : saved.getLines()) {
+                BillItemGST line = findGstLine(bill, rl.getBillItemId());
+                applyStockReturnForGstLine(line, bill.getId(), rl.getQuantityReturned(), noteBase, billLocation, bill.getBillDate());
+            }
+            return toStockReturnResponse(saved);
+        }
+
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        Map<Long, BigDecimal> returnedBefore = loadReturnedByLineId(BillKind.NON_GST, billId);
+        BillInventoryReturn header = new BillInventoryReturn();
+        header.setBillKind(BillKind.NON_GST);
+        header.setBillId(billId);
+        header.setLocation(location != null ? location.trim() : null);
+        header.setNotes(request.getNotes());
+        header.setCreatedByUserId(actorUserId);
+        for (BillStockReturnLineRequestDTO ln : request.getLines()) {
+            BillItemNonGST line = findNonGstLine(bill, ln.getBillItemId());
+            BigDecimal sold = line.getQuantity() != null ? line.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal already = returnedBefore.getOrDefault(line.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal q = BigDecimal.valueOf(ln.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+            if (q.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("Return quantity must be positive");
+            }
+            if (already.add(q).subtract(sold).compareTo(PAY_ROUND_EPS) > 0) {
+                throw new IllegalArgumentException(
+                        "Return exceeds remaining for line item id=" + line.getId() + ": sold=" + sold + ", already returned="
+                                + already + ", this return=" + q);
+            }
+            BillInventoryReturnLine rl = new BillInventoryReturnLine();
+            rl.setBillItemId(line.getId());
+            rl.setQuantityReturned(q);
+            header.addLine(rl);
+        }
+        BillInventoryReturn saved = billInventoryReturnRepository.save(header);
+        String noteBase = "Partial stock return id=" + saved.getId() + " for Non-GST bill " + bill.getBillNumber() + " (bill id="
+                + bill.getId() + ")";
+        for (BillInventoryReturnLine rl : saved.getLines()) {
+            BillItemNonGST line = findNonGstLine(bill, rl.getBillItemId());
+            applyStockReturnForNonGstLine(line, bill.getId(), rl.getQuantityReturned(), noteBase, billLocation, bill.getBillDate());
+        }
+        return toStockReturnResponse(saved);
+    }
+
+    /**
+     * Patch billed quantities on existing lines: decreases call inventory return; increases call stock deduction.
+     * Lines that already have partial stock returns cannot have quantity reduced (avoid double stock movement);
+     * increases are still allowed.
+     */
+    public BillResponseDTO patchBillLineQuantities(Long billId, String billType, BillLineQuantitiesPatchRequestDTO request,
+            String location, Long actorUserId) {
+        if (request == null || request.getLines() == null || request.getLines().isEmpty()) {
+            throw new IllegalArgumentException("At least one line patch is required");
+        }
+        Set<Long> seen = new HashSet<>();
+        for (BillLineQuantityPatchLineDTO ln : request.getLines()) {
+            if (ln.getBillItemId() == null || !seen.add(ln.getBillItemId())) {
+                throw new IllegalArgumentException("Each billItemId must appear once and be non-null");
+            }
+        }
+        if ("GST".equalsIgnoreCase(billType)) {
+            BillGST bill = billGSTRepository.findByIdWithItemsAndProducts(billId)
+                    .orElseThrow(() -> new RuntimeException("GST Bill not found with id: " + billId));
+            String billLocation = resolveBillLocation(bill, bill.getCustomer());
+            if (!Objects.equals(location, billLocation)) {
+                throw new RuntimeException("GST Bill not found with id: " + billId);
+            }
+            Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.GST, billId);
+            for (BillLineQuantityPatchLineDTO patch : request.getLines()) {
+                BillItemGST line = findGstLine(bill, patch.getBillItemId());
+                BigDecimal oldQ = line.getQuantity() != null ? line.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                BigDecimal newQ = BigDecimal.valueOf(patch.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+                BigDecimal r = returnedByLine.getOrDefault(line.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                if (newQ.compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException("Quantity must be positive for line id=" + line.getId());
+                }
+                if (newQ.compareTo(r) < 0) {
+                    throw new IllegalArgumentException(
+                            "New quantity cannot be below already-returned quantity for line id=" + line.getId() + " (returned=" + r
+                                    + ")");
+                }
+                if (r.compareTo(BigDecimal.ZERO) > 0 && newQ.compareTo(oldQ) < 0) {
+                    throw new IllegalArgumentException(
+                            "Cannot reduce billed quantity on line id=" + line.getId()
+                                    + " because partial stock returns exist; increase quantity or record further returns instead.");
+                }
+                BigDecimal delta = oldQ.subtract(newQ);
+                String note = "Qty update via GST bill " + bill.getBillNumber() + " line id=" + line.getId();
+                if (delta.compareTo(PAY_ROUND_EPS) > 0) {
+                    applyStockReturnForGstLine(line, bill.getId(), delta, note, billLocation, bill.getBillDate());
+                } else if (delta.compareTo(PAY_ROUND_EPS.negate()) < 0) {
+                    BigDecimal add = delta.negate();
+                    LocalDate stockDate = bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now();
+                    if (line.getProduct() != null && line.getProduct().getId() != null) {
+                        productService.deductStock(line.getProduct().getId(), add, bill.getId(), note, BillKind.GST, stockDate);
+                    } else {
+                        productService.deductStockByName(line.getProductName(), add, bill.getId(), note, BillKind.GST, stockDate);
+                    }
+                }
+                line.setQuantity(newQ);
+                BigDecimal price = line.getPricePerUnit() != null ? line.getPricePerUnit().setScale(2, RoundingMode.HALF_UP)
+                        : BigDecimal.ZERO;
+                line.setItemTotalPrice(price.multiply(newQ).setScale(2, RoundingMode.HALF_UP));
+            }
+            recomputeGstAmountsFromItems(bill);
+            assertBillTotalCoversRecordedPayments(BillKind.GST, billId, bill.getTotalAmount());
+            bill.setUpdatedByUserId(actorUserId);
+            billGSTRepository.save(bill);
+            refreshBillFinancialsGST(bill, billLocation);
+            BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
+            recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, null);
+            return convertGSTToResponseDTO(bill, billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, billId), adv);
+        }
+
+        BillNonGST bill = billNonGSTRepository.findByIdWithItemsAndProducts(billId)
+                .orElseThrow(() -> new RuntimeException("NonGST Bill not found with id: " + billId));
+        String billLocation = resolveBillLocation(bill, bill.getCustomer());
+        if (!Objects.equals(location, billLocation)) {
+            throw new RuntimeException("NonGST Bill not found with id: " + billId);
+        }
+        Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.NON_GST, billId);
+        for (BillLineQuantityPatchLineDTO patch : request.getLines()) {
+            BillItemNonGST line = findNonGstLine(bill, patch.getBillItemId());
+            BigDecimal oldQ = line.getQuantity() != null ? line.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal newQ = BigDecimal.valueOf(patch.getQuantity()).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal r = returnedByLine.getOrDefault(line.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            if (newQ.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("Quantity must be positive for line id=" + line.getId());
+            }
+            if (newQ.compareTo(r) < 0) {
+                throw new IllegalArgumentException(
+                        "New quantity cannot be below already-returned quantity for line id=" + line.getId() + " (returned=" + r + ")");
+            }
+            if (r.compareTo(BigDecimal.ZERO) > 0 && newQ.compareTo(oldQ) < 0) {
+                throw new IllegalArgumentException(
+                        "Cannot reduce billed quantity on line id=" + line.getId()
+                                + " because partial stock returns exist; increase quantity or record further returns instead.");
+            }
+            BigDecimal delta = oldQ.subtract(newQ);
+            String note = "Qty update via Non-GST bill " + bill.getBillNumber() + " line id=" + line.getId();
+            if (delta.compareTo(PAY_ROUND_EPS) > 0) {
+                applyStockReturnForNonGstLine(line, bill.getId(), delta, note, billLocation, bill.getBillDate());
+            } else if (delta.compareTo(PAY_ROUND_EPS.negate()) < 0) {
+                BigDecimal add = delta.negate();
+                LocalDate stockDate = bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now();
+                if (line.getProduct() != null && line.getProduct().getId() != null) {
+                    productService.deductStock(line.getProduct().getId(), add, bill.getId(), note, BillKind.NON_GST, stockDate);
+                } else {
+                    productService.deductStockByName(line.getProductName(), add, bill.getId(), note, BillKind.NON_GST, stockDate);
+                }
+            }
+            line.setQuantity(newQ);
+            BigDecimal price = line.getPricePerUnit() != null ? line.getPricePerUnit().setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            line.setItemTotalPrice(price.multiply(newQ).setScale(2, RoundingMode.HALF_UP));
+        }
+        recomputeNonGstAmountsFromItems(bill);
+        assertBillTotalCoversRecordedPayments(BillKind.NON_GST, billId, bill.getTotalAmount());
+        bill.setUpdatedByUserId(actorUserId);
+        billNonGSTRepository.save(bill);
+        refreshBillFinancialsNonGST(bill, billLocation);
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+        recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, null);
+        return convertNonGSTToResponseDTO(bill,
+                billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, billId), adv);
+    }
+
+    /**
      * Soft-delete a bill and reverse its side effects (pending, partial, or fully paid):
-     * - restore inventory for all line quantities (same mapping as create-time deduction)
+     * - restore inventory for remaining line quantities (sold minus prior partial returns)
      * - soft-delete every active bill payment and reverse CASH/UPI in-hand via ledger + daily budget
      * - restore customer advance amounts applied to this bill
      */
@@ -677,6 +1448,12 @@ public class BillService {
             if (!Objects.equals(location, billLocation)) {
                 throw new RuntimeException("GST Bill not found with id: " + billId);
             }
+            List<ResolvedLine> snapshotPayLines = resolvedNonAdvanceLinesForSnapshot(BillKind.GST, billId);
+            recordBillCancellationAudit(BillKind.GST, billId, bill.getBillNumber(), bill.getBillDate(), bill.getCustomer(),
+                    bill.getTotalAmount(), bill.getPaymentMethod(),
+                    bill.getPaymentStatus() != null ? bill.getPaymentStatus().name() : null,
+                    billLocation, actorUserId);
+            inventoryReservationService.releaseForBill(billId, BillKind.GST);
             revertStockForGstBill(bill, billLocation);
             deactivateBillPayments(BillKind.GST, billId, billLocation, actorUserId);
             customerAdvanceService.reverseAdvanceUsageForBill(BillKind.GST, billId);
@@ -686,6 +1463,7 @@ public class BillService {
             bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
             bill.setPaymentMethod("-");
             billGSTRepository.save(bill);
+            recomputeSnapshotsForBillMutation(billLocation, bill.getBillDate(), snapshotPayLines);
             return;
         }
 
@@ -699,6 +1477,12 @@ public class BillService {
         if (!Objects.equals(location, billLocation)) {
             throw new RuntimeException("NonGST Bill not found with id: " + billId);
         }
+        List<ResolvedLine> snapshotPayLines = resolvedNonAdvanceLinesForSnapshot(BillKind.NON_GST, billId);
+        recordBillCancellationAudit(BillKind.NON_GST, billId, bill.getBillNumber(), bill.getBillDate(), bill.getCustomer(),
+                bill.getTotalAmount(), bill.getPaymentMethod(),
+                bill.getPaymentStatus() != null ? bill.getPaymentStatus().name() : null,
+                billLocation, actorUserId);
+        inventoryReservationService.releaseForBill(billId, BillKind.NON_GST);
         revertStockForNonGstBill(bill, billLocation);
         deactivateBillPayments(BillKind.NON_GST, billId, billLocation, actorUserId);
         customerAdvanceService.reverseAdvanceUsageForBill(BillKind.NON_GST, billId);
@@ -708,6 +1492,27 @@ public class BillService {
         bill.setPaidAmount(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
         bill.setPaymentMethod("-");
         billNonGSTRepository.save(bill);
+        recomputeSnapshotsForBillMutation(billLocation, bill.getBillDate(), snapshotPayLines);
+    }
+
+    /**
+     * Cancelled-bill audit for the branch, filtered by bill date (inclusive).
+     */
+    public List<BillCancellationLogDTO> getBillCancellationLogs(String location, LocalDate billDateFrom, LocalDate billDateTo) {
+        String loc = location == null ? "" : location.trim();
+        if (loc.isBlank()) {
+            throw new IllegalArgumentException("Location is required");
+        }
+        LocalDate to = billDateTo != null ? billDateTo : LocalDate.now();
+        LocalDate from = billDateFrom != null ? billDateFrom : to.minusDays(30);
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException("billDateTo must be on or after billDateFrom");
+        }
+        return billCancellationLogRepository
+                .findByLocationAndBillDateBetweenOrderByCancelledAtDesc(loc, from, to)
+                .stream()
+                .map(this::toCancellationLogDto)
+                .collect(Collectors.toList());
     }
 
     /**
@@ -763,8 +1568,7 @@ public class BillService {
         // Check NonGST bills
         BillNonGST nonGstBill = billNonGSTRepository
                 .findByBillNumberAndBillLocationWithItemsAndProducts(billNumber, location).orElse(null);
-        System.out.println("Searching for bill number: " + billNumber + " in location: " + location
-                + "\nNonGST Bill Details: " + nonGstBill); // Enhanced debug log to print the entire object
+        log.info("Searching for bill number={} in location={}, nonGstBillFound={}", billNumber, location, nonGstBill != null);
         if (nonGstBill != null) {
             List<BillPayment> payments = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST,
                     nonGstBill.getId());
@@ -916,11 +1720,26 @@ public class BillService {
         responseDTO.setCreatedAt(bill.getCreatedAt());
         responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
         responseDTO.setLocation(resolveBillLocation(bill, bill.getCustomer()));
+        responseDTO.setBackdated(Boolean.TRUE.equals(bill.getBackdated()));
+        responseDTO.setOriginalCreatedAt(bill.getOriginalCreatedAt());
+        responseDTO.setBackdateReason(bill.getBackdateReason());
+        responseDTO.setBackdateApprovedBy(bill.getBackdateApprovedBy());
+        responseDTO.setSupplementaryBill(Boolean.TRUE.equals(bill.getSupplementaryBill()));
+        responseDTO.setParentBillId(bill.getParentBillId());
+        responseDTO.setParentBillType(bill.getParentBillType());
+        responseDTO.setSupplementaryReason(bill.getSupplementaryReason());
+
+        Map<Long, BigDecimal> returnedByLineGst = loadReturnedByLineId(BillKind.GST, bill.getId());
 
         // Convert items
         List<BillItemDTO> itemDTOs = bill.getItems().stream()
                 .map(item -> {
                     BillItemDTO itemDTO = new BillItemDTO();
+                    itemDTO.setItemId(item.getId());
+                    BigDecimal rtd = returnedByLineGst.getOrDefault(item.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                    itemDTO.setQuantityReturnedToDate(rtd.doubleValue());
+                    BigDecimal sold = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                    itemDTO.setQuantityReturnable(sold.subtract(rtd).max(BigDecimal.ZERO).doubleValue());
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
                     // Use pricePerSqftAfter from product if available, otherwise use stored
@@ -1009,18 +1828,33 @@ public class BillService {
         responseDTO.setCreatedAt(bill.getCreatedAt());
         responseDTO.setCreatedByUserId(bill.getCreatedByUserId());
         responseDTO.setLocation(resolveBillLocation(bill, bill.getCustomer()));
+        responseDTO.setBackdated(Boolean.TRUE.equals(bill.getBackdated()));
+        responseDTO.setOriginalCreatedAt(bill.getOriginalCreatedAt());
+        responseDTO.setBackdateReason(bill.getBackdateReason());
+        responseDTO.setBackdateApprovedBy(bill.getBackdateApprovedBy());
+        responseDTO.setSupplementaryBill(Boolean.TRUE.equals(bill.getSupplementaryBill()));
+        responseDTO.setParentBillId(bill.getParentBillId());
+        responseDTO.setParentBillType(bill.getParentBillType());
+        responseDTO.setSupplementaryReason(bill.getSupplementaryReason());
+
+        Map<Long, BigDecimal> returnedByLineNon = loadReturnedByLineId(BillKind.NON_GST, bill.getId());
 
         // Convert items
         List<BillItemDTO> itemDTOs = bill.getItems().stream()
                 .map(item -> {
                     BillItemDTO itemDTO = new BillItemDTO();
+                    itemDTO.setItemId(item.getId());
+                    BigDecimal rtd = returnedByLineNon.getOrDefault(item.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+                    itemDTO.setQuantityReturnedToDate(rtd.doubleValue());
+                    BigDecimal sold = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                    itemDTO.setQuantityReturnable(sold.subtract(rtd).max(BigDecimal.ZERO).doubleValue());
                     itemDTO.setItemName(item.getProductName());
                     itemDTO.setCategory(item.getProductType());
                     // Use pricePerSqftAfter from product if available, otherwise use stored
                     // pricePerUnit
                     double priceToUse = item.getPricePerUnit().doubleValue();
                     double purchasePrice = 0.0;
-                    System.out.println("prince to use " + priceToUse);
+                    log.info("Using pricePerUnit={} for Non-GST item DTO mapping", priceToUse);
                     try {
                         Product product = item.getProduct();
                         if (product != null && product.getPricePerSqftAfter() != null) {
@@ -1064,14 +1898,13 @@ public class BillService {
         BigDecimal adv = advanceUsed != null ? advanceUsed.setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal total = billTotal.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal paid = paymentRows.stream()
-                .map(BillPayment::getAmount)
-                .filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
+        List<BillPayment> nonAdvanceRows = paymentRows == null
+                ? List.of()
+                : paymentRows.stream().filter(p -> !isAdvancePayment(p)).collect(Collectors.toList());
+        BigDecimal paid = sumNonAdvancePayments(nonAdvanceRows);
 
         boolean inferLegacyFull = adv.compareTo(BigDecimal.ZERO) == 0
-                && paymentRows.isEmpty()
+                && nonAdvanceRows.isEmpty()
                 && storedSummary != null
                 && !storedSummary.isBlank()
                 && !"-".equals(storedSummary.trim())
@@ -1086,11 +1919,11 @@ public class BillService {
         dto.setPaidAmount(paid.doubleValue());
         BigDecimal due = total.subtract(adv).subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         dto.setAmountDue(due.doubleValue());
-        dto.setPayments(paymentRows.stream().map(this::toPaymentResponseDTO).collect(Collectors.toList()));
+        dto.setPayments(nonAdvanceRows.stream().map(this::toPaymentResponseDTO).collect(Collectors.toList()));
 
         String summary;
-        if (!paymentRows.isEmpty()) {
-            summary = formatSummaryFromPersisted(paymentRows);
+        if (!nonAdvanceRows.isEmpty()) {
+            summary = formatSummaryFromPersisted(nonAdvanceRows);
             if (adv.compareTo(BigDecimal.ZERO) > 0) {
                 summary = "Adv ₹" + adv.toPlainString() + " + " + summary;
             }
@@ -1127,6 +1960,160 @@ public class BillService {
         return null;
     }
 
+    private Map<Long, BigDecimal> loadReturnedByLineId(BillKind kind, Long billId) {
+        Map<Long, BigDecimal> map = new HashMap<>();
+        for (Object[] row : billInventoryReturnLineRepository.sumReturnedQuantityGroupedByBillItemId(kind, billId)) {
+            if (row == null || row.length < 2 || row[0] == null) {
+                continue;
+            }
+            Long itemId = ((Number) row[0]).longValue();
+            BigDecimal sum = row[1] instanceof BigDecimal bd ? bd : BigDecimal.valueOf(((Number) row[1]).doubleValue());
+            map.put(itemId, sum.setScale(2, RoundingMode.HALF_UP));
+        }
+        return map;
+    }
+
+    private static BillItemGST findGstLine(BillGST bill, Long billItemId) {
+        return bill.getItems().stream()
+                .filter(i -> i.getId() != null && i.getId().equals(billItemId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("GST bill line not found: billItemId=" + billItemId));
+    }
+
+    private static BillItemNonGST findNonGstLine(BillNonGST bill, Long billItemId) {
+        return bill.getItems().stream()
+                .filter(i -> i.getId() != null && i.getId().equals(billItemId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Non-GST bill line not found: billItemId=" + billItemId));
+    }
+
+    private void applyStockReturnForGstLine(BillItemGST line, Long billId, BigDecimal qty, String note, String billLocation,
+            LocalDate stockLedgerDate) {
+        if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        BigDecimal q = qty.setScale(2, RoundingMode.HALF_UP);
+        LocalDate d = stockLedgerDate != null ? stockLedgerDate : LocalDate.now();
+        if (line.getProduct() != null && line.getProduct().getId() != null) {
+            productService.recordBillStockReturn(line.getProduct().getId(), q, billId, BillKind.GST, note, billLocation, d);
+        } else {
+            productService.recordBillStockReturnByName(line.getProductName(), q, billId, BillKind.GST, note, billLocation, d);
+        }
+    }
+
+    private void applyStockReturnForNonGstLine(BillItemNonGST line, Long billId, BigDecimal qty, String note, String billLocation,
+            LocalDate stockLedgerDate) {
+        if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        BigDecimal q = qty.setScale(2, RoundingMode.HALF_UP);
+        LocalDate d = stockLedgerDate != null ? stockLedgerDate : LocalDate.now();
+        if (line.getProduct() != null && line.getProduct().getId() != null) {
+            productService.recordBillStockReturn(line.getProduct().getId(), q, billId, BillKind.NON_GST, note, billLocation, d);
+        } else {
+            productService.recordBillStockReturnByName(line.getProductName(), q, billId, BillKind.NON_GST, note, billLocation, d);
+        }
+    }
+
+    private static BillStockReturnResponseDTO toStockReturnResponse(BillInventoryReturn saved) {
+        BillStockReturnResponseDTO dto = new BillStockReturnResponseDTO();
+        dto.setReturnId(saved.getId());
+        dto.setBillKind(saved.getBillKind().name());
+        dto.setBillId(saved.getBillId());
+        dto.setCreatedAt(saved.getCreatedAt());
+        if (saved.getLines() != null) {
+            for (BillInventoryReturnLine rl : saved.getLines()) {
+                dto.getLines().add(new BillStockReturnResponseDTO.BillStockReturnLineResponseDTO(
+                        rl.getBillItemId(),
+                        rl.getQuantityReturned() != null ? rl.getQuantityReturned().doubleValue() : 0.0));
+            }
+        }
+        return dto;
+    }
+
+    private static BigDecimal nz(BigDecimal b) {
+        return b != null ? b.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private void recomputeGstAmountsFromItems(BillGST bill) {
+        List<BillItemGST> items = bill.getItems();
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("Bill has no line items");
+        }
+        BigDecimal totalSqft = BigDecimal.ZERO;
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (BillItemGST item : items) {
+            BigDecimal q = nz(item.getQuantity());
+            if (q.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("Each line quantity must be positive");
+            }
+            BigDecimal p = nz(item.getPricePerUnit());
+            totalSqft = totalSqft.add(q);
+            subtotal = subtotal.add(p.multiply(q));
+        }
+        subtotal = subtotal.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxRate = bill.getTaxRate() != null ? bill.getTaxRate() : BigDecimal.ZERO;
+        BigDecimal taxAmount = subtotal.multiply(taxRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+        BigDecimal totalAmount = subtotal.add(taxAmount)
+                .add(nz(bill.getServiceCharge()))
+                .add(nz(bill.getLabourCharge()))
+                .add(nz(bill.getTransportationCharge()))
+                .add(nz(bill.getOtherExpenses()))
+                .subtract(nz(bill.getDiscountAmount()));
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
+        }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
+        bill.setSubtotal(subtotal);
+        bill.setTaxAmount(taxAmount);
+        bill.setTotalAmount(totalAmount);
+    }
+
+    private void recomputeNonGstAmountsFromItems(BillNonGST bill) {
+        List<BillItemNonGST> items = bill.getItems();
+        if (items == null || items.isEmpty()) {
+            throw new IllegalArgumentException("Bill has no line items");
+        }
+        BigDecimal totalSqft = BigDecimal.ZERO;
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (BillItemNonGST item : items) {
+            BigDecimal q = nz(item.getQuantity());
+            if (q.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new IllegalArgumentException("Each line quantity must be positive");
+            }
+            BigDecimal p = nz(item.getPricePerUnit());
+            totalSqft = totalSqft.add(q);
+            subtotal = subtotal.add(p.multiply(q));
+        }
+        subtotal = subtotal.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalAmount = subtotal.add(nz(bill.getServiceCharge()))
+                .add(nz(bill.getLabourCharge()))
+                .add(nz(bill.getTransportationCharge()))
+                .add(nz(bill.getOtherExpenses()))
+                .subtract(nz(bill.getDiscountAmount()));
+        if (totalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = BigDecimal.ZERO;
+        }
+        totalAmount = totalAmount.setScale(2, RoundingMode.HALF_UP);
+        bill.setTotalSqft(totalSqft.setScale(2, RoundingMode.HALF_UP));
+        bill.setSubtotal(subtotal);
+        bill.setTotalAmount(totalAmount);
+    }
+
+    private void assertBillTotalCoversRecordedPayments(BillKind kind, Long billId, BigDecimal newTotal) {
+        List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, billId);
+        BigDecimal paid = sumNonAdvancePayments(rows);
+        BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(kind, billId).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal covered = adv.add(paid).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal total = newTotal.setScale(2, RoundingMode.HALF_UP);
+        if (total.add(PAY_ROUND_EPS).compareTo(covered) < 0) {
+            throw new IllegalArgumentException(
+                    "Adjusted bill total (₹" + total.toPlainString() + ") cannot be less than advance used plus payments (₹"
+                            + covered.toPlainString() + ")");
+        }
+    }
+
     private void deactivateBillPayments(BillKind kind, Long billId, String location, Long actorUserId) {
         List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, billId);
         for (BillPayment p : rows) {
@@ -1142,66 +2129,48 @@ public class BillService {
     }
 
     private void revertStockForGstBill(BillGST bill, String location) {
-        Map<Long, BigDecimal> byProductId = new HashMap<>();
-        Map<String, BigDecimal> byProductName = new HashMap<>();
         if (bill.getItems() == null) {
             return;
         }
+        Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.GST, bill.getId());
+        String note = "Stock restored via deleted GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
         for (BillItemGST item : bill.getItems()) {
-            BigDecimal qty = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+            BigDecimal sold = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal ret = returnedByLine.getOrDefault(item.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal net = sold.subtract(ret).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            if (net.compareTo(BigDecimal.ZERO) <= 0) {
                 continue;
             }
-            if (item.getProduct() != null && item.getProduct().getId() != null) {
-                byProductId.merge(item.getProduct().getId(), qty, BigDecimal::add);
-            } else if (item.getProductName() != null && !item.getProductName().isBlank()) {
-                byProductName.merge(item.getProductName(), qty, BigDecimal::add);
-            }
-        }
-        String note = "Stock restored via deleted GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
-        for (Map.Entry<Long, BigDecimal> e : byProductId.entrySet()) {
-            productService.addStock(e.getKey(), e.getValue(), note, location);
-        }
-        for (Map.Entry<String, BigDecimal> e : byProductName.entrySet()) {
-            productService.addStockByName(e.getKey(), e.getValue(), note, location);
+            applyStockReturnForGstLine(item, bill.getId(), net, note, location, bill.getBillDate());
         }
     }
 
     private void revertStockForNonGstBill(BillNonGST bill, String location) {
-        Map<Long, BigDecimal> byProductId = new HashMap<>();
-        Map<String, BigDecimal> byProductName = new HashMap<>();
         if (bill.getItems() == null) {
             return;
         }
+        Map<Long, BigDecimal> returnedByLine = loadReturnedByLineId(BillKind.NON_GST, bill.getId());
+        String note = "Stock restored via deleted Non-GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
         for (BillItemNonGST item : bill.getItems()) {
-            BigDecimal qty = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-            if (qty.compareTo(BigDecimal.ZERO) <= 0) {
+            BigDecimal sold = item.getQuantity() != null ? item.getQuantity().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            BigDecimal ret = returnedByLine.getOrDefault(item.getId(), BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            BigDecimal net = sold.subtract(ret).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+            if (net.compareTo(BigDecimal.ZERO) <= 0) {
                 continue;
             }
-            if (item.getProduct() != null && item.getProduct().getId() != null) {
-                byProductId.merge(item.getProduct().getId(), qty, BigDecimal::add);
-            } else if (item.getProductName() != null && !item.getProductName().isBlank()) {
-                byProductName.merge(item.getProductName(), qty, BigDecimal::add);
-            }
-        }
-        String note = "Stock restored via deleted Non-GST bill " + bill.getBillNumber() + " (id=" + bill.getId() + ")";
-        for (Map.Entry<Long, BigDecimal> e : byProductId.entrySet()) {
-            productService.addStock(e.getKey(), e.getValue(), note, location);
-        }
-        for (Map.Entry<String, BigDecimal> e : byProductName.entrySet()) {
-            productService.addStockByName(e.getKey(), e.getValue(), note, location);
+            applyStockReturnForNonGstLine(item, bill.getId(), net, note, location, bill.getBillDate());
         }
     }
 
     private void refreshBillFinancialsGST(BillGST bill, String location) {
         List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId());
         BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal paid = rows.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = sumNonAdvancePayments(rows);
         BigDecimal covered = adv.add(paid).setScale(2, RoundingMode.HALF_UP);
         bill.setPaidAmount(paid);
         bill.setPaymentStatus(toGstPaymentStatus(bill.getTotalAmount(), covered));
         List<ResolvedLine> lines = rows.stream()
+                .filter(r -> !isAdvancePayment(r))
                 .map(r -> new ResolvedLine(
                         r.getAmount() != null ? r.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO,
                         r.getPaymentMode() != null ? r.getPaymentMode() : BillPaymentMode.OTHER,
@@ -1217,12 +2186,12 @@ public class BillService {
     private void refreshBillFinancialsNonGST(BillNonGST bill, String location) {
         List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, bill.getId());
         BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal paid = rows.stream().map(BillPayment::getAmount).filter(Objects::nonNull)
-                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paid = sumNonAdvancePayments(rows);
         BigDecimal covered = adv.add(paid).setScale(2, RoundingMode.HALF_UP);
         bill.setPaidAmount(paid);
         bill.setPaymentStatus(toNonGstPaymentStatus(bill.getTotalAmount(), covered));
         List<ResolvedLine> lines = rows.stream()
+                .filter(r -> !isAdvancePayment(r))
                 .map(r -> new ResolvedLine(
                         r.getAmount() != null ? r.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO,
                         r.getPaymentMode() != null ? r.getPaymentMode() : BillPaymentMode.OTHER,
@@ -1274,7 +2243,7 @@ public class BillService {
         return kind.name() + ":" + billId;
     }
 
-    private List<ResolvedLine> resolvePaymentLines(BillRequestDTO req, BigDecimal totalAmount, LocalDate billDate) {
+    private List<ResolvedLine> resolvePaymentLines(BillRequestDTO req, BigDecimal totalAmount, LocalDate billDate, String userRole) {
         List<BillPaymentRequestDTO> incoming = req.getPayments();
         if (incoming != null && !incoming.isEmpty()) {
             List<ResolvedLine> out = new ArrayList<>();
@@ -1288,6 +2257,7 @@ public class BillService {
                 }
                 BillPaymentMode mode = parseBillPaymentMode(p.getPaymentMode());
                 LocalDate pd = p.getPaymentDate() != null ? p.getPaymentDate() : billDate;
+                validateBackdatedPaymentDate(req, pd, userRole);
                 out.add(new ResolvedLine(amt, mode, pd));
             }
             BigDecimal sum = sumResolvedLines(out);
@@ -1301,6 +2271,7 @@ public class BillService {
         String legacy = normalizePaymentMethod(req.getPaymentMethod());
         if (legacy != null && totalAmount.compareTo(BigDecimal.ZERO) > 0) {
             BillPaymentMode mode = parseBillPaymentMode(legacy);
+            validateBackdatedPaymentDate(req, billDate, userRole);
             return List.of(new ResolvedLine(totalAmount.setScale(2, RoundingMode.HALF_UP), mode, billDate));
         }
         return List.of();
@@ -1385,6 +2356,7 @@ public class BillService {
             case UPI -> 'U';
             case BANK_TRANSFER -> 'B';
             case CHEQUE -> 'Q';
+            case WALLET -> 'W';
             case OTHER -> 'O';
         };
     }
@@ -1420,6 +2392,7 @@ public class BillService {
             BillPayment row = new BillPayment();
             row.setBillKind(kind);
             row.setBillId(billId);
+            row.setSourceType("BILL_PAYMENT");
             row.setAmount(line.amount());
             row.setPaymentMode(line.mode());
             row.setPaymentDate(line.paymentDate());
@@ -1432,6 +2405,38 @@ public class BillService {
                         p.getAmount(), p.getPaymentDate(), true);
             }
         }
+    }
+
+    private void persistWalletAdvancePayment(BillKind kind, Long billId, BigDecimal amount, LocalDate paymentDate, Long actorUserId) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        BillPayment row = new BillPayment();
+        row.setBillKind(kind);
+        row.setBillId(billId);
+        row.setSourceType("ADVANCE");
+        row.setAmount(amount.setScale(2, RoundingMode.HALF_UP));
+        row.setPaymentMode(BillPaymentMode.WALLET);
+        row.setPaymentDate(paymentDate != null ? paymentDate : LocalDate.now());
+        row.setCreatedBy(actorUserId);
+        row.setUpdatedBy(actorUserId);
+        billPaymentRepository.save(row);
+    }
+
+    private static boolean isAdvancePayment(BillPayment p) {
+        return p != null && "ADVANCE".equalsIgnoreCase(p.getSourceType());
+    }
+
+    private static BigDecimal sumNonAdvancePayments(List<BillPayment> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return rows.stream()
+                .filter(r -> !isAdvancePayment(r))
+                .map(BillPayment::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private static BillPaymentMode parseBillPaymentMode(String raw) {
@@ -1452,6 +2457,239 @@ public class BillService {
         }
         String t = paymentMethod.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private LocalDate resolveRequestedBillDate(BillRequestDTO req, String userRole) {
+        LocalDate requested = req.getBillDate() != null ? req.getBillDate() : LocalDate.now();
+        LocalDate today = LocalDate.now();
+        if (!requested.isBefore(today)) {
+            return requested;
+        }
+        long days = ChronoUnit.DAYS.between(requested, today);
+        if (days > MAX_BACKDATE_DAYS) {
+            throw new IllegalArgumentException("Backdated bill is allowed only within last " + MAX_BACKDATE_DAYS + " days");
+        }
+        if (!isAdmin(userRole)) {
+            throw new IllegalArgumentException("Only admin can create backdated bills");
+        }
+        if (trimToNull(req.getBackdateReason()) == null) {
+            throw new IllegalArgumentException("backdateReason is required for backdated bill");
+        }
+        if (trimToNull(req.getBackdateApprovedBy()) == null) {
+            throw new IllegalArgumentException("backdateApprovedBy is required for backdated bill");
+        }
+        return requested;
+    }
+
+    private void validateBackdatedPaymentDate(BillRequestDTO req, LocalDate paymentDate, String userRole) {
+        if (paymentDate == null || !paymentDate.isBefore(LocalDate.now())) {
+            return;
+        }
+        if (!Boolean.TRUE.equals(req.getAllowBackdatedPaymentDate())) {
+            throw new IllegalArgumentException("Past paymentDate requires allowBackdatedPaymentDate=true");
+        }
+        if (!isAdmin(userRole)) {
+            throw new IllegalArgumentException("Only admin can approve backdated paymentDate");
+        }
+        if (trimToNull(req.getBackdatedPaymentApprovedBy()) == null) {
+            throw new IllegalArgumentException("backdatedPaymentApprovedBy is required for past paymentDate");
+        }
+    }
+
+    private void recomputeSnapshotsForBillMutation(String location, LocalDate billDate, List<ResolvedLine> payLines) {
+        recomputeSnapshotsForBillMutation(location, billDate, payLines, null);
+    }
+
+    /**
+     * Rebuilds stored daily closing snapshots from the earliest impacted calendar day through today so that
+     * each day's opening in-hand (prior snapshot closing) stays chained after backdated bills or payment edits.
+     */
+    private void recomputeSnapshotsForBillMutation(String location, LocalDate billDate, List<ResolvedLine> payLines,
+            Set<LocalDate> extraImpactedDates) {
+        if (location == null || location.isBlank()) {
+            return;
+        }
+        LocalDate earliest = null;
+        if (billDate != null) {
+            earliest = billDate;
+        }
+        if (payLines != null) {
+            for (ResolvedLine line : payLines) {
+                if (line == null || line.paymentDate() == null) {
+                    continue;
+                }
+                if (earliest == null || line.paymentDate().isBefore(earliest)) {
+                    earliest = line.paymentDate();
+                }
+            }
+        }
+        if (extraImpactedDates != null) {
+            for (LocalDate x : extraImpactedDates) {
+                if (x == null) {
+                    continue;
+                }
+                if (earliest == null || x.isBefore(earliest)) {
+                    earliest = x;
+                }
+            }
+        }
+        if (earliest == null) {
+            return;
+        }
+        cascadeClosingSnapshotsFrom(location, earliest);
+    }
+
+    private void recomputeSnapshotsForBillFromDbPayments(String location, LocalDate billDate, BillKind kind, Long billId,
+            Set<LocalDate> extraImpactedDates) {
+        if (location == null || location.isBlank() || billId == null) {
+            return;
+        }
+        List<ResolvedLine> lines = resolvedNonAdvanceLinesForSnapshot(kind, billId);
+        recomputeSnapshotsForBillMutation(location, billDate, lines, extraImpactedDates);
+    }
+
+    private void cascadeClosingSnapshotsFrom(String location, LocalDate earliest) {
+        LocalDate end = LocalDate.now();
+        if (earliest.isAfter(end)) {
+            try {
+                dailyClosingSnapshotService.createOrUpdateSnapshot(earliest, location);
+            } catch (Exception ex) {
+                log.warn("snapshot_recompute_failed location={} date={} error={}", location, earliest, ex.getMessage());
+            }
+            return;
+        }
+        int steps = 0;
+        for (LocalDate d = earliest; !d.isAfter(end); d = d.plusDays(1)) {
+            if (steps++ > 450) {
+                log.warn("snapshot_cascade_cap_reached location={} from={}", location, earliest);
+                break;
+            }
+            try {
+                dailyClosingSnapshotService.createOrUpdateSnapshot(d, location);
+            } catch (Exception ex) {
+                log.warn("snapshot_recompute_failed location={} date={} error={}", location, d, ex.getMessage());
+            }
+        }
+    }
+
+    private List<ResolvedLine> resolvedNonAdvanceLinesForSnapshot(BillKind kind, Long billId) {
+        List<BillPayment> pays = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, billId);
+        if (pays == null || pays.isEmpty()) {
+            return List.of();
+        }
+        return pays.stream()
+                .filter(p -> !isAdvancePayment(p))
+                .map(p -> new ResolvedLine(
+                        p.getAmount() != null ? p.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO,
+                        p.getPaymentMode() != null ? p.getPaymentMode() : BillPaymentMode.OTHER,
+                        p.getPaymentDate()))
+                .collect(Collectors.toList());
+    }
+
+    private void recordBillCancellationAudit(BillKind kind, Long billId, String billNumber, LocalDate billDate,
+            Customer customer, BigDecimal totalAmount, String paymentMethodSummary, String paymentStatus,
+            String location, Long actorUserId) {
+        List<BillPayment> pays = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(kind, billId);
+        BigDecimal paidFromPayments = sumNonAdvancePayments(pays);
+        BigDecimal advanceApplied = customerAdvanceService.sumAdvanceUsedForBill(kind, billId)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal inHandCollected = sumInHandNonAdvancePayments(pays);
+        String custName = resolveCustomerDisplayNameForAudit(customer);
+        String phone = customer != null ? customer.getPhone() : null;
+
+        BillCancellationLog row = new BillCancellationLog();
+        row.setBillKind(kind.name());
+        row.setBillId(billId);
+        row.setBillNumber(billNumber != null ? billNumber : "");
+        row.setLocation(location != null ? location.trim() : "");
+        row.setBillDate(billDate != null ? billDate : LocalDate.now());
+        row.setCustomerName(custName);
+        row.setCustomerPhone(phone);
+        row.setTotalAmount(totalAmount != null ? totalAmount.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
+        row.setPaidFromPayments(paidFromPayments);
+        row.setAdvanceApplied(advanceApplied);
+        row.setInHandCollected(inHandCollected);
+        row.setPaymentMethodSummary(paymentMethodSummary);
+        row.setPaymentStatus(paymentStatus);
+        row.setCancelledAt(LocalDateTime.now());
+        row.setCancelledByUserId(actorUserId);
+        billCancellationLogRepository.save(row);
+    }
+
+    private BillCancellationLogDTO toCancellationLogDto(BillCancellationLog e) {
+        return BillCancellationLogDTO.builder()
+                .id(e.getId())
+                .billKind(e.getBillKind())
+                .billId(e.getBillId())
+                .billNumber(e.getBillNumber())
+                .location(e.getLocation())
+                .billDate(e.getBillDate())
+                .customerName(e.getCustomerName())
+                .customerPhone(e.getCustomerPhone())
+                .totalAmount(e.getTotalAmount())
+                .paidFromPayments(e.getPaidFromPayments())
+                .advanceApplied(e.getAdvanceApplied())
+                .inHandCollected(e.getInHandCollected())
+                .paymentMethodSummary(e.getPaymentMethodSummary())
+                .paymentStatus(e.getPaymentStatus())
+                .cancelledAt(e.getCancelledAt())
+                .cancelledByUserId(e.getCancelledByUserId())
+                .build();
+    }
+
+    private static BigDecimal sumInHandNonAdvancePayments(List<BillPayment> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal sum = BigDecimal.ZERO;
+        for (BillPayment p : rows) {
+            if (isAdvancePayment(p) || p.getAmount() == null) {
+                continue;
+            }
+            if (p.getPaymentMode() != BillPaymentMode.CASH && p.getPaymentMode() != BillPaymentMode.UPI) {
+                continue;
+            }
+            sum = sum.add(p.getAmount());
+        }
+        return sum.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static String resolveCustomerDisplayNameForAudit(Customer c) {
+        if (c == null) {
+            return null;
+        }
+        if (c.getCustomerName() != null && !c.getCustomerName().isBlank()) {
+            return c.getCustomerName().trim();
+        }
+        if (c.getName() != null && !c.getName().isBlank()) {
+            return c.getName().trim();
+        }
+        return null;
+    }
+
+    private static boolean isAdmin(String role) {
+        return role != null && "admin".equalsIgnoreCase(role.trim());
+    }
+
+    private static BillKind parseBillKind(String raw) {
+        if (raw == null || raw.isBlank()) {
+            throw new IllegalArgumentException("Bill type is required");
+        }
+        String v = raw.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+        if ("GST".equals(v)) {
+            return BillKind.GST;
+        }
+        if ("NON_GST".equals(v) || "NONGST".equals(v)) {
+            return BillKind.NON_GST;
+        }
+        throw new IllegalArgumentException("Invalid bill type. Use GST or NON_GST");
+    }
+
+    private static String normalizeParentBillType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return parseBillKind(raw).name();
     }
 
     private String trimToNull(String s) {

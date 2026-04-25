@@ -49,11 +49,11 @@ public class WebConfig implements WebMvcConfigurer {
                 };
             }
             corsRegistration.allowedOrigins(origins);
-            System.out.println("[WebConfig] CORS configured to allow origins: " + java.util.Arrays.toString(origins));
+            // log.info("[WebConfig] CORS configured to allow origins: {}", java.util.Arrays.toString(origins));
         } else {
             String[] origins = allowedOriginsString.split(",\\s*");
             corsRegistration.allowedOrigins(origins);
-            System.out.println("[WebConfig] CORS configured with specific origins: " + java.util.Arrays.toString(origins));
+            // log.info("[WebConfig] CORS configured with specific origins: {}", java.util.Arrays.toString(origins));
         }
         
         corsRegistration.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD")

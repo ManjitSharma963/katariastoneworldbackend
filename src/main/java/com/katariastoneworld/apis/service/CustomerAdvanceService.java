@@ -9,9 +9,11 @@ import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.Customer;
 import com.katariastoneworld.apis.entity.CustomerAdvance;
 import com.katariastoneworld.apis.entity.CustomerAdvanceUsage;
+import com.katariastoneworld.apis.entity.CustomerWalletTransaction;
 import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.CustomerRepository;
+import com.katariastoneworld.apis.repository.CustomerWalletTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,9 @@ public class CustomerAdvanceService {
     private CustomerRepository customerRepository;
 
     @Autowired
+    private CustomerWalletTransactionRepository customerWalletTransactionRepository;
+
+    @Autowired
     private FinancialLedgerService financialLedgerService;
 
     public CustomerAdvanceResponseDTO createAdvance(CustomerAdvanceCreateRequestDTO dto, String location) {
@@ -58,17 +63,25 @@ public class CustomerAdvanceService {
         row.setPaymentMode(parseAdvancePaymentMode(dto.getPaymentMode()));
         row.setDescription(dto.getDescription() != null ? dto.getDescription().trim() : null);
         CustomerAdvance saved = customerAdvanceRepository.save(row);
+
+        // New wallet-ledger insert (while keeping legacy customer_advance insert for safety).
+        CustomerWalletTransaction walletTxn = new CustomerWalletTransaction();
+        walletTxn.setCustomer(customer);
+        walletTxn.setTxnType(CustomerWalletTransaction.TxnType.CREDIT);
+        walletTxn.setAmount(amt);
+        walletTxn.setSource("ADVANCE_DEPOSIT");
+        walletTxn.setPaymentMode(saved.getPaymentMode());
+        walletTxn.setNotes(saved.getDescription());
+        walletTxn.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+        customerWalletTransactionRepository.save(walletTxn);
+
         financialLedgerService.recordAdvanceDeposit(location, customer.getId(), saved.getId(),
                 saved.getPaymentMode() != null ? saved.getPaymentMode() : BillPaymentMode.CASH,
                 saved.getAmount(), saved.getCreatedAt() != null ? saved.getCreatedAt().toLocalDate() : null);
         return toResponseDTO(saved);
     }
 
-    /**
-     * FIFO apply advance to a bill; persists usage rows and decrements remaining_amount.
-     *
-     * @return total amount applied from advance toward this bill
-     */
+    /** Wallet-ledger apply: debit from active balance for this bill reference. */
     public BigDecimal applyAdvanceFifo(Long customerId, BillKind billKind, Long billId, BigDecimal billTotal) {
         Objects.requireNonNull(customerId);
         Objects.requireNonNull(billKind);
@@ -77,76 +90,118 @@ public class CustomerAdvanceService {
         if (gross.compareTo(ZERO) <= 0) {
             return ZERO;
         }
-        BigDecimal stillNeed = gross;
-        BigDecimal totalApplied = ZERO;
-        List<CustomerAdvance> rows = customerAdvanceRepository.findEligibleForApplyLocked(customerId, ZERO);
-        for (CustomerAdvance adv : rows) {
-            if (stillNeed.compareTo(ZERO) <= 0) {
-                break;
-            }
-            BigDecimal rem = adv.getRemainingAmount().setScale(2, RoundingMode.HALF_UP);
-            if (rem.compareTo(ZERO) <= 0) {
-                continue;
-            }
-            BigDecimal take = rem.min(stillNeed);
-            CustomerAdvanceUsage u = new CustomerAdvanceUsage();
-            u.setAdvance(adv);
-            u.setBillKind(billKind);
-            u.setBillId(billId);
-            u.setAmountUsed(take);
-            customerAdvanceUsageRepository.save(u);
-            adv.setRemainingAmount(rem.subtract(take).setScale(2, RoundingMode.HALF_UP));
-            customerAdvanceRepository.save(adv);
-            stillNeed = stillNeed.subtract(take).setScale(2, RoundingMode.HALF_UP);
-            totalApplied = totalApplied.add(take).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal walletBalance = getWalletBalance(customerId);
+        BigDecimal targetUse = walletBalance.min(gross).setScale(2, RoundingMode.HALF_UP);
+        if (targetUse.compareTo(ZERO) <= 0) {
+            return ZERO;
         }
-        return totalApplied;
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found with id: " + customerId));
+        String ref = walletReferenceForBill(billKind, billId);
+        BigDecimal remainingNeeded = targetUse;
+
+        // Reconstruct per-credit remaining using FIFO:
+        // first absorb all prior debits, then consume remaining credits for this bill.
+        List<CustomerWalletTransaction> txns = customerWalletTransactionRepository
+                .findByCustomer_IdAndStatusOrderByCreatedAtAscIdAsc(
+                        customerId,
+                        CustomerWalletTransaction.Status.ACTIVE);
+        BigDecimal priorDebits = ZERO;
+        for (CustomerWalletTransaction t : txns) {
+            if (t.getTxnType() == CustomerWalletTransaction.TxnType.DEBIT) {
+                priorDebits = priorDebits.add(nvl(t.getAmount()));
+            }
+        }
+
+        BigDecimal debitToAllocate = priorDebits;
+        for (CustomerWalletTransaction t : txns) {
+            if (remainingNeeded.compareTo(ZERO) <= 0) break;
+            if (t.getTxnType() != CustomerWalletTransaction.TxnType.CREDIT) continue;
+            BigDecimal creditRemaining = nvl(t.getAmount());
+            if (creditRemaining.compareTo(ZERO) <= 0) continue;
+
+            if (debitToAllocate.compareTo(ZERO) > 0) {
+                BigDecimal absorb = creditRemaining.min(debitToAllocate);
+                creditRemaining = creditRemaining.subtract(absorb).setScale(2, RoundingMode.HALF_UP);
+                debitToAllocate = debitToAllocate.subtract(absorb).setScale(2, RoundingMode.HALF_UP);
+            }
+
+            if (creditRemaining.compareTo(ZERO) <= 0) continue;
+
+            BigDecimal use = creditRemaining.min(remainingNeeded).setScale(2, RoundingMode.HALF_UP);
+            if (use.compareTo(ZERO) <= 0) continue;
+
+            CustomerWalletTransaction walletTxn = new CustomerWalletTransaction();
+            walletTxn.setCustomer(customer);
+            walletTxn.setTxnType(CustomerWalletTransaction.TxnType.DEBIT);
+            walletTxn.setAmount(use);
+            walletTxn.setSource("BILL_PAYMENT");
+            walletTxn.setReferenceId(ref);
+            walletTxn.setNotes("Used in bill");
+            // Carry forward original deposit mode so sales mode totals can bucket advance correctly.
+            walletTxn.setPaymentMode(t.getPaymentMode() != null ? t.getPaymentMode() : BillPaymentMode.OTHER);
+            walletTxn.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+            customerWalletTransactionRepository.save(walletTxn);
+
+            remainingNeeded = remainingNeeded.subtract(use).setScale(2, RoundingMode.HALF_UP);
+        }
+
+        BigDecimal used = targetUse.subtract(remainingNeeded).setScale(2, RoundingMode.HALF_UP);
+        return used.compareTo(ZERO) > 0 ? used : ZERO;
     }
 
     public BigDecimal sumAdvanceUsedForBill(BillKind billKind, Long billId) {
-        return customerAdvanceUsageRepository.findByBillKindAndBillId(billKind, billId).stream()
-                .map(CustomerAdvanceUsage::getAmountUsed)
-                .filter(Objects::nonNull)
-                .reduce(ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
+        return nvl(customerWalletTransactionRepository
+                .sumDebitByBillReference(
+                        walletReferenceForBill(billKind, billId),
+                        CustomerWalletTransaction.Status.ACTIVE,
+                        CustomerWalletTransaction.TxnType.DEBIT));
     }
 
-    /**
-     * Reverse advance usages linked to a bill (used when a bill is deleted/cancelled).
-     * Restores each advance's remaining amount and removes usage rows.
-     */
+    /** Reverse by inserting a CREDIT refund wallet transaction. */
     public void reverseAdvanceUsageForBill(BillKind billKind, Long billId) {
-        List<CustomerAdvanceUsage> usages = customerAdvanceUsageRepository.findByBillKindAndBillId(billKind, billId);
-        if (usages == null || usages.isEmpty()) {
+        String ref = walletReferenceForBill(billKind, billId);
+        BigDecimal used = nvl(customerWalletTransactionRepository.sumDebitByBillReference(
+                ref,
+                CustomerWalletTransaction.Status.ACTIVE,
+                CustomerWalletTransaction.TxnType.DEBIT));
+        if (used.compareTo(ZERO) <= 0) {
             return;
         }
-        for (CustomerAdvanceUsage usage : usages) {
-            CustomerAdvance adv = usage.getAdvance();
-            if (adv == null) {
-                continue;
-            }
-            BigDecimal rem = adv.getRemainingAmount() != null ? adv.getRemainingAmount().setScale(2, RoundingMode.HALF_UP) : ZERO;
-            BigDecimal used = usage.getAmountUsed() != null ? usage.getAmountUsed().setScale(2, RoundingMode.HALF_UP) : ZERO;
-            adv.setRemainingAmount(rem.add(used).setScale(2, RoundingMode.HALF_UP));
-            customerAdvanceRepository.save(adv);
+        List<CustomerWalletTransaction> txns = customerWalletTransactionRepository
+                .findBySourceAndReferenceIdAndTxnTypeAndStatus(
+                        "BILL_PAYMENT",
+                        ref,
+                        CustomerWalletTransaction.TxnType.DEBIT,
+                        CustomerWalletTransaction.Status.ACTIVE);
+        if (txns.isEmpty()) {
+            return;
         }
-        customerAdvanceUsageRepository.deleteAll(usages);
+        Customer customer = txns.get(0).getCustomer();
+        CustomerWalletTransaction refund = new CustomerWalletTransaction();
+        refund.setCustomer(customer);
+        refund.setTxnType(CustomerWalletTransaction.TxnType.CREDIT);
+        refund.setAmount(used);
+        refund.setSource("REFUND");
+        refund.setReferenceId(ref);
+        refund.setNotes("Bill cancelled");
+        refund.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+        customerWalletTransactionRepository.save(refund);
     }
 
     public Map<String, BigDecimal> sumAdvanceUsedGrouped(Collection<Long> gstBillIds, Collection<Long> nonGstBillIds) {
         Map<String, BigDecimal> map = new HashMap<>();
         if (gstBillIds != null && !gstBillIds.isEmpty()) {
-            for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.GST,
-                    gstBillIds)) {
-                String k = "GST:" + u.getBillId();
-                map.merge(k, u.getAmountUsed().setScale(2, RoundingMode.HALF_UP), BigDecimal::add);
+            for (Long id : gstBillIds) {
+                String k = "GST:" + id;
+                map.put(k, sumAdvanceUsedForBill(BillKind.GST, id));
             }
         }
         if (nonGstBillIds != null && !nonGstBillIds.isEmpty()) {
-            for (CustomerAdvanceUsage u : customerAdvanceUsageRepository.findByBillKindAndBillIdIn(BillKind.NON_GST,
-                    nonGstBillIds)) {
-                String k = "NON_GST:" + u.getBillId();
-                map.merge(k, u.getAmountUsed().setScale(2, RoundingMode.HALF_UP), BigDecimal::add);
+            for (Long id : nonGstBillIds) {
+                String k = "NON_GST:" + id;
+                map.put(k, sumAdvanceUsedForBill(BillKind.NON_GST, id));
             }
         }
         return map;
@@ -155,16 +210,19 @@ public class CustomerAdvanceService {
     public CustomerAdvanceSummaryDTO getSummary(Long customerId, String location) {
         customerRepository.findByIdAndLocation(customerId, location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + customerId));
-        List<CustomerAdvance> rows = customerAdvanceRepository.findByCustomer_IdOrderByCreatedAtDesc(customerId);
-        BigDecimal totalAdvance = BigDecimal.ZERO;
-        BigDecimal totalRemaining = BigDecimal.ZERO;
-        for (CustomerAdvance a : rows) {
-            totalAdvance = totalAdvance.add(a.getAmount());
-            totalRemaining = totalRemaining.add(a.getRemainingAmount());
-        }
-        totalAdvance = totalAdvance.setScale(2, RoundingMode.HALF_UP);
-        totalRemaining = totalRemaining.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal totalUsed = totalAdvance.subtract(totalRemaining).max(ZERO).setScale(2, RoundingMode.HALF_UP);
+        // Deposits only — do not count REFUND credits (bill cancel) as "new advance"; those restore wallet balance.
+        BigDecimal totalAdvance = nvl(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                customerId,
+                CustomerWalletTransaction.Status.ACTIVE,
+                CustomerWalletTransaction.TxnType.CREDIT,
+                "ADVANCE_DEPOSIT"));
+        // Usage on bills only (wallet debits from advance application).
+        BigDecimal totalUsed = nvl(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                customerId,
+                CustomerWalletTransaction.Status.ACTIVE,
+                CustomerWalletTransaction.TxnType.DEBIT,
+                "BILL_PAYMENT"));
+        BigDecimal totalRemaining = getWalletBalance(customerId).setScale(2, RoundingMode.HALF_UP);
         CustomerAdvanceSummaryDTO dto = new CustomerAdvanceSummaryDTO();
         dto.setTotalAdvance(totalAdvance.doubleValue());
         dto.setTotalUsed(totalUsed.doubleValue());
@@ -175,36 +233,59 @@ public class CustomerAdvanceService {
     public List<CustomerAdvanceHistoryEntryDTO> getHistory(Long customerId, String location) {
         customerRepository.findByIdAndLocation(customerId, location)
                 .orElseThrow(() -> new RuntimeException("Customer not found with id: " + customerId));
-        List<CustomerAdvance> advances = customerAdvanceRepository.findByCustomer_IdOrderByCreatedAtDesc(customerId);
+        List<CustomerWalletTransaction> txns = customerWalletTransactionRepository.findByCustomer_IdOrderByCreatedAtDesc(customerId);
         List<CustomerAdvanceHistoryEntryDTO> entries = new ArrayList<>();
-        for (CustomerAdvance a : advances) {
+        for (CustomerWalletTransaction t : txns) {
+            String kind = t.getTxnType() == CustomerWalletTransaction.TxnType.CREDIT ? "DEPOSIT" : "USAGE";
+            Long billId = parseBillIdFromReference(t.getReferenceId());
+            String billKind = parseBillKindFromReference(t.getReferenceId());
             entries.add(new CustomerAdvanceHistoryEntryDTO(
-                    "DEPOSIT",
-                    a.getCreatedAt(),
-                    a.getAmount().doubleValue(),
-                    a.getDescription() != null ? a.getDescription() : "Advance / token",
-                    a.getPaymentMode() != null ? a.getPaymentMode().name() : null,
-                    null,
-                    null,
-                    a.getId()));
-        }
-        for (CustomerAdvance a : advances) {
-            List<CustomerAdvanceUsage> usages = customerAdvanceUsageRepository.findByAdvanceIdOrderByCreatedAtDesc(a.getId());
-            for (CustomerAdvanceUsage u : usages) {
-                entries.add(new CustomerAdvanceHistoryEntryDTO(
-                        "USAGE",
-                        u.getCreatedAt(),
-                        u.getAmountUsed().doubleValue(),
-                        "Applied to bill",
-                        null,
-                        u.getBillId(),
-                        u.getBillKind() != null ? u.getBillKind().name() : null,
-                        a.getId()));
-            }
+                    kind,
+                    t.getCreatedAt(),
+                    t.getAmount() != null ? t.getAmount().doubleValue() : 0.0,
+                    t.getNotes() != null ? t.getNotes() : t.getSource(),
+                    t.getPaymentMode() != null ? t.getPaymentMode().name() : null,
+                    billId,
+                    billKind,
+                    t.getId()));
         }
         entries.sort(Comparator.comparing(CustomerAdvanceHistoryEntryDTO::getCreatedAt,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         return entries;
+    }
+
+    private BigDecimal getWalletBalance(Long customerId) {
+        return nvl(customerWalletTransactionRepository.getActiveWalletBalance(
+                customerId,
+                CustomerWalletTransaction.Status.ACTIVE,
+                CustomerWalletTransaction.TxnType.CREDIT));
+    }
+
+    private static BigDecimal nvl(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static String walletReferenceForBill(BillKind billKind, Long billId) {
+        return billKind.name() + ":" + billId;
+    }
+
+    private static Long parseBillIdFromReference(String referenceId) {
+        if (referenceId == null || !referenceId.contains(":")) {
+            return null;
+        }
+        String[] parts = referenceId.split(":", 2);
+        try {
+            return Long.parseLong(parts[1]);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private static String parseBillKindFromReference(String referenceId) {
+        if (referenceId == null || !referenceId.contains(":")) {
+            return null;
+        }
+        return referenceId.split(":", 2)[0];
     }
 
     private static CustomerAdvanceResponseDTO toResponseDTO(CustomerAdvance a) {
@@ -226,7 +307,7 @@ public class CustomerAdvanceService {
         try {
             return BillPaymentMode.parseFlexible(raw);
         } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("Invalid payment mode. Use CASH, UPI, BANK_TRANSFER, or CHEQUE.");
+            throw new IllegalArgumentException("Invalid payment mode. Use CASH, UPI, BANK_TRANSFER, CHEQUE, or WALLET.");
         }
     }
 }

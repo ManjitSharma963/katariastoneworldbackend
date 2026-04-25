@@ -308,6 +308,8 @@ For detailed API documentation with request/response examples, see [API_DOCUMENT
 This project includes comprehensive documentation:
 
 - **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete API reference with request/response examples for all endpoints
+- **[MODULE_NOTES.md](MODULE_NOTES.md)** - Short module-by-module backend explanation
+- **[OBSERVABILITY_RUNBOOK.md](OBSERVABILITY_RUNBOOK.md)** - Request correlation, health/metrics, alerts, performance baselines
 - **[SETUP.md](SETUP.md)** - Detailed setup instructions and troubleshooting guide
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Guidelines for contributing to the project
 - **[README_DATABASE_MIGRATION.md](README_DATABASE_MIGRATION.md)** - Database migration guide for adding location columns
@@ -316,6 +318,7 @@ This project includes comprehensive documentation:
 
 - **New to the project?** Start with [SETUP.md](SETUP.md) for installation and configuration
 - **Want to use the API?** Check [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for endpoint details
+- **Need module overview quickly?** Read [MODULE_NOTES.md](MODULE_NOTES.md)
 - **Want to contribute?** Read [CONTRIBUTING.md](CONTRIBUTING.md) for coding standards and workflow
 - **Need to migrate database?** Follow [README_DATABASE_MIGRATION.md](README_DATABASE_MIGRATION.md)
 

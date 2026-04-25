@@ -24,13 +24,13 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/auth")
 @Tag(name = "Authentication", description = "Authentication and user management endpoints")
 public class AuthController {
-    
+
     @Autowired
     private AuthService authService;
-    
+
     @Autowired
     private JwtUtil jwtUtil;
-    
+
     @Operation(
             summary = "Register a new user",
             description = "Register a new user account with username, email, password, location, and role"
@@ -42,19 +42,11 @@ public class AuthController {
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @PostMapping("/register")
-    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequestDTO registerRequest) {
-        try {
-            RegisterResponseDTO response = authService.register(registerRequest);
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(new ErrorResponse("Validation failed", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new ErrorResponse("Error", e.getMessage()));
-        }
+    public ResponseEntity<RegisterResponseDTO> register(@Valid @RequestBody RegisterRequestDTO registerRequest) {
+        RegisterResponseDTO response = authService.register(registerRequest);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
-    
+
     @Operation(
             summary = "Login and get JWT token",
             description = "Authenticate user credentials and receive JWT token for accessing protected endpoints"
@@ -66,19 +58,11 @@ public class AuthController {
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @PostMapping("/login")
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
-        try {
-            AuthResponseDTO response = authService.login(loginRequest);
-            return ResponseEntity.ok(response);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new ErrorResponse("Authentication failed", e.getMessage()));
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(new ErrorResponse("Error", e.getMessage()));
-        }
+    public ResponseEntity<AuthResponseDTO> login(@Valid @RequestBody LoginRequestDTO loginRequest) {
+        AuthResponseDTO response = authService.login(loginRequest);
+        return ResponseEntity.ok(response);
     }
-    
+
     @Operation(
             summary = "Get current user details",
             description = "Get details of the currently authenticated user from JWT token"
@@ -90,31 +74,22 @@ public class AuthController {
     })
     @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser(HttpServletRequest request) {
-        try {
-            String token = extractTokenFromRequest(request);
-            if (token == null) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(new TokenErrorResponse("Unauthorized", "Missing authorization token", false, "MISSING_TOKEN"));
-            }
-            
-            JwtUtil.TokenValidationResult validationResult = jwtUtil.validateTokenWithDetails(token);
-            if (!validationResult.isValid()) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(new TokenErrorResponse("Unauthorized", validationResult.getMessage(), 
-                                validationResult.isExpired(), 
-                                validationResult.isExpired() ? "TOKEN_EXPIRED" : "INVALID_TOKEN"));
-            }
-            
-            Long userId = jwtUtil.extractUserId(token);
-            UserResponseDTO user = authService.getCurrentUser(userId);
-            return ResponseEntity.ok(user);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(new TokenErrorResponse("Unauthorized", "Invalid or expired token", false, "INVALID_TOKEN"));
+    public ResponseEntity<UserResponseDTO> getCurrentUser(HttpServletRequest request) {
+        String token = extractTokenFromRequest(request);
+        if (token == null) {
+            throw new SecurityException("Missing authorization token");
         }
+
+        JwtUtil.TokenValidationResult validationResult = jwtUtil.validateTokenWithDetails(token);
+        if (!validationResult.isValid()) {
+            throw new SecurityException(validationResult.getMessage());
+        }
+
+        Long userId = jwtUtil.extractUserId(token);
+        UserResponseDTO user = authService.getCurrentUser(userId);
+        return ResponseEntity.ok(user);
     }
-    
+
     private String extractTokenFromRequest(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
@@ -122,79 +97,4 @@ public class AuthController {
         }
         return null;
     }
-    
-    // Inner class for error responses
-    private static class ErrorResponse {
-        private String error;
-        private String message;
-        
-        public ErrorResponse(String error, String message) {
-            this.error = error;
-            this.message = message;
-        }
-        
-        public String getError() {
-            return error;
-        }
-        
-        public void setError(String error) {
-            this.error = error;
-        }
-        
-        public String getMessage() {
-            return message;
-        }
-        
-        public void setMessage(String message) {
-            this.message = message;
-        }
-    }
-    
-    // Inner class for token error responses with expiration flag
-    private static class TokenErrorResponse {
-        private String error;
-        private String message;
-        private boolean tokenExpired;
-        private String code;
-        
-        public TokenErrorResponse(String error, String message, boolean tokenExpired, String code) {
-            this.error = error;
-            this.message = message;
-            this.tokenExpired = tokenExpired;
-            this.code = code;
-        }
-        
-        public String getError() {
-            return error;
-        }
-        
-        public void setError(String error) {
-            this.error = error;
-        }
-        
-        public String getMessage() {
-            return message;
-        }
-        
-        public void setMessage(String message) {
-            this.message = message;
-        }
-        
-        public boolean isTokenExpired() {
-            return tokenExpired;
-        }
-        
-        public void setTokenExpired(boolean tokenExpired) {
-            this.tokenExpired = tokenExpired;
-        }
-        
-        public String getCode() {
-            return code;
-        }
-        
-        public void setCode(String code) {
-            this.code = code;
-        }
-    }
 }
-

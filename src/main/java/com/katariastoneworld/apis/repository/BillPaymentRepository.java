@@ -24,12 +24,12 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
      * Uses bill.location; for legacy rows with null bill.location, falls back to customer.location.
      */
     @Query("""
-            SELECT p FROM BillPayment p WHERE p.paymentDate = :date AND (
+            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate = :date AND (
               (p.billKind = com.katariastoneworld.apis.entity.BillKind.GST AND EXISTS (
-                  SELECT 1 FROM BillGST b WHERE b.id = p.billId
+                  SELECT 1 FROM BillGST b WHERE b.id = p.billId AND b.isDeleted = false
                     AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
               OR (p.billKind = com.katariastoneworld.apis.entity.BillKind.NON_GST AND EXISTS (
-                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId
+                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId AND b.isDeleted = false
                     AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
             )
             """)
@@ -40,12 +40,12 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
      * Uses bill.location; for legacy rows with null bill.location, falls back to customer.location.
      */
     @Query("""
-            SELECT p FROM BillPayment p WHERE p.paymentDate >= :from AND p.paymentDate <= :to AND (
+            SELECT p FROM BillPayment p WHERE p.isDeleted = false AND p.paymentDate >= :from AND p.paymentDate <= :to AND (
               (p.billKind = com.katariastoneworld.apis.entity.BillKind.GST AND EXISTS (
-                  SELECT 1 FROM BillGST b WHERE b.id = p.billId
+                  SELECT 1 FROM BillGST b WHERE b.id = p.billId AND b.isDeleted = false
                     AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
               OR (p.billKind = com.katariastoneworld.apis.entity.BillKind.NON_GST AND EXISTS (
-                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId
+                  SELECT 1 FROM BillNonGST b WHERE b.id = p.billId AND b.isDeleted = false
                     AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))))
             )
             """)

@@ -19,5 +19,7 @@ public class ClientTransactionResponseDTO {
     private String notes;
     private String location;
     private LocalDateTime createdAt;
+    /** Set only on running-ledger endpoint: cumulative signed balance after this row. */
+    private BigDecimal runningBalanceAfter;
 }
 

@@ -7,6 +7,8 @@ import com.katariastoneworld.apis.entity.StateGstMaster;
 import com.katariastoneworld.apis.repository.SellerRepository;
 import com.katariastoneworld.apis.repository.StateGstMasterRepository;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,7 @@ import java.util.Optional;
 
 @Service
 public class PdfService {
+    private static final Logger log = LoggerFactory.getLogger(PdfService.class);
 
     @Autowired
     private SellerRepository sellerRepository;
@@ -48,14 +51,14 @@ public class PdfService {
                 "No seller information found for location " + (location != null ? location : "(any)") + ". Please add seller details."));
 
         // Log seller details for verification
-        System.out.println("Seller details fetched:");
-        System.out.println("  - Name: " + seller.getSellerName());
-        System.out.println("  - GSTIN: " + seller.getGstin());
-        System.out.println("  - Mobile: " + seller.getMobile());
-        System.out.println("  - Bank Name: " + seller.getBankName());
-        System.out.println("  - Account Number: " + seller.getAccountNumber());
-        System.out.println("  - IFSC Code: " + seller.getIfscCode());
-        System.out.println("  - Address: " + (seller.getAddress() != null
+        log.info("Seller details fetched");
+        log.info("  - Name: {}", seller.getSellerName());
+        log.info("  - GSTIN: {}", seller.getGstin());
+        log.info("  - Mobile: {}", seller.getMobile());
+        log.info("  - Bank Name: {}", seller.getBankName());
+        log.info("  - Account Number: {}", seller.getAccountNumber());
+        log.info("  - IFSC Code: {}", seller.getIfscCode());
+        log.info("  - Address: {}", (seller.getAddress() != null
                 ? seller.getAddress().substring(0, Math.min(50, seller.getAddress().length())) + "..."
                 : "null"));
 
@@ -68,7 +71,7 @@ public class PdfService {
 
     public byte[] generateSimpleBillPdf(BillResponseDTO bill) throws IOException {
         // Load simple HTML template (no GST, no seller details)
-        System.out.println("Loading simple bill template-------->" + bill);
+        log.info("Loading simple bill template for billNo={}", bill != null ? bill.getBillNumber() : null);
         String htmlTemplate = loadSimpleHtmlTemplate();
 
         // Populate simple template with bill data (only items and total)
@@ -115,16 +118,16 @@ public class PdfService {
                 ? seller.getTermsAndConditions().replace("\n", "<br />")
                 : "";
 
-        System.out.println("Populating seller information in template:");
-        System.out.println("  - GSTIN: '" + sellerGstin + "'");
-        System.out.println("  - Mobile: '" + sellerMobile + "'");
-        System.out.println("  - Name: '" + sellerName + "'");
-        System.out.println("  - Bank Name: '" + bankName + "'");
-        System.out.println("  - Account Number: '" + accountNumber + "'");
-        System.out.println("  - IFSC Code: '" + ifscCode + "'");
-        System.out.println("  - Terms and Conditions: '" + (termsAndConditions != null && !termsAndConditions.isEmpty()
+        log.info("Populating seller information in template");
+        log.info("  - GSTIN: '{}'", sellerGstin);
+        log.info("  - Mobile: '{}'", sellerMobile);
+        log.info("  - Name: '{}'", sellerName);
+        log.info("  - Bank Name: '{}'", bankName);
+        log.info("  - Account Number: '{}'", accountNumber);
+        log.info("  - IFSC Code: '{}'", ifscCode);
+        log.info("  - Terms and Conditions: '{}'", (termsAndConditions != null && !termsAndConditions.isEmpty()
                 ? termsAndConditions.substring(0, Math.min(100, termsAndConditions.length())) + "..."
-                : "EMPTY OR NULL") + "'");
+                : "EMPTY OR NULL"));
 
         html = html.replace("{{sellerGstin}}", sellerGstin);
         html = html.replace("{{sellerName}}", sellerName);
@@ -151,9 +154,9 @@ public class PdfService {
         String stateOfOrigin = extractStateFromAddress(seller.getAddress());
         String stateOfDestination = extractStateFromAddress(bill.getAddress());
 
-        System.out.println("Extracted states:");
-        System.out.println("  - State of Origin (from seller address): '" + stateOfOrigin + "'");
-        System.out.println("  - State of Destination (from customer address): '" + stateOfDestination + "'");
+        log.info("Extracted states:");
+        log.info("  - State of Origin (from seller address): '{}'", stateOfOrigin);
+        log.info("  - State of Destination (from customer address): '{}'", stateOfDestination);
 
         // Fetch GST codes from state_gst_master table
         String sellerStateGstCode = "-";
@@ -164,9 +167,9 @@ public class PdfService {
                     .orElse(null);
             if (sellerStateGst != null) {
                 sellerStateGstCode = sellerStateGst.getGstCode();
-                System.out.println("  - Seller State GST Code: '" + sellerStateGstCode + "'");
+                log.info("  - Seller State GST Code: '{}'", sellerStateGstCode);
             } else {
-                System.out.println("  - Warning: Seller State GST Code not found for state: '" + stateOfOrigin + "'");
+                log.warn("  - Warning: Seller State GST Code not found for state: '{}'", stateOfOrigin);
             }
         }
 
@@ -175,7 +178,7 @@ public class PdfService {
                     .orElse(null);
             if (buyerStateGst != null) {
                 buyerStateGstCode = buyerStateGst.getGstCode();
-                System.out.println("  - Buyer State GST Code: '" + buyerStateGstCode + "'");
+                log.info("  - Buyer State GST Code: '{}'", buyerStateGstCode);
             } else {
                 System.out
                         .println("  - Warning: Buyer State GST Code not found for state: '" + stateOfDestination + "'");
@@ -225,10 +228,10 @@ public class PdfService {
         boolean isSameState = stateOfOrigin != null && stateOfDestination != null
                 && stateOfOrigin.equalsIgnoreCase(stateOfDestination);
 
-        System.out.println("GST Calculation:");
-        System.out.println("  - State of Origin: '" + stateOfOrigin + "'");
-        System.out.println("  - State of Destination: '" + stateOfDestination + "'");
-        System.out.println("  - Same State: " + isSameState);
+        log.info("GST Calculation:");
+        log.info("  - State of Origin: '{}'", stateOfOrigin);
+        log.info("  - State of Destination: '{}'", stateOfDestination);
+        log.info("  - Same State: {}", isSameState);
 
         // Calculate tax based on state: Same state = divide into two parts (CGST+SGST),
         // Different states = IGST (one tax)
@@ -241,14 +244,14 @@ public class PdfService {
             // Same state (intra-state): Divide tax into two parts (9% + 9% = 18%)
             cgstAmount = taxAmount / 2.0;
             sgstAmount = taxAmount / 2.0;
-            System.out.println("  - Same state (intra-state): Dividing tax into two parts");
-            System.out.println("  - CGST Amount (9%): " + cgstAmount);
-            System.out.println("  - SGST Amount (9%): " + sgstAmount);
+            log.info("  - Same state (intra-state): Dividing tax into two parts");
+            log.info("  - CGST Amount (9%): {}", cgstAmount);
+            log.info("  - SGST Amount (9%): {}", sgstAmount);
         } else if (taxAmount > 0) {
             // Different states (inter-state): Show as one tax IGST (18%)
             igstAmount = taxAmount;
-            System.out.println("  - Different states (inter-state): Using IGST");
-            System.out.println("  - IGST Amount (18%): " + igstAmount);
+            log.info("  - Different states (inter-state): Using IGST");
+            log.info("  - IGST Amount (18%): {}", igstAmount);
         }
 
         // Amounts
@@ -407,10 +410,10 @@ public class PdfService {
         boolean foundUnreplaced = false;
         while (matcher.find()) {
             if (!foundUnreplaced) {
-                System.err.println("WARNING: Found unreplaced placeholders in template:");
+                log.error("WARNING: Found unreplaced placeholders in template:");
                 foundUnreplaced = true;
             }
-            System.err.println("  - " + matcher.group());
+            log.error("  - {}", matcher.group());
         }
 
         // Remove any remaining placeholders (shouldn't happen if all are replaced)
@@ -424,13 +427,13 @@ public class PdfService {
         // This regex finds & that are not part of an entity
         html = html.replaceAll("&(?!(?:amp|lt|gt|quot|#\\d+|#x[0-9a-fA-F]+);)", "&amp;");
 
-        System.out.println("Template populated successfully. Final HTML length: " + html.length());
+        log.info("Template populated successfully. Final HTML length: {}", html.length());
         return html;
     }
 
     private String populateSimpleTemplate(String template, BillResponseDTO bill) {
         String html = template;
-        System.out.println("html template loaded for simple bill: " + html);
+        log.info("Simple bill template loaded. HTML length={}", html.length());
         // Bill basic info
         html = html.replace("{{billNumber}}", bill.getBillNumber() != null ? bill.getBillNumber() : "");
         html = html.replace("{{billDate}}",
@@ -504,7 +507,7 @@ public class PdfService {
         // Escape any remaining unescaped & characters
         html = html.replaceAll("&(?!(?:amp|lt|gt|quot|#\\d+|#x[0-9a-fA-F]+);)", "&amp;");
 
-        System.out.println("Simple template populated successfully. Final HTML length: " + html.length());
+        log.info("Simple template populated successfully. Final HTML length: {}", html.length());
         return html;
     }
 
@@ -675,8 +678,7 @@ public class PdfService {
 
     private byte[] convertHtmlToPdf(String html) throws IOException {
         try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
-            System.out.println("Html --> " + html);
-            System.out.println("Converting HTML to PDF. HTML length: " + html.length());
+            log.debug("Converting HTML to PDF. HTML length: {}", html.length());
 
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.withHtmlContent(html, null);
@@ -684,13 +686,13 @@ public class PdfService {
             builder.run();
 
             byte[] pdfBytes = outputStream.toByteArray();
-            System.out.println("PDF generated successfully. Size: " + pdfBytes.length + " bytes");
+            log.info("PDF generated successfully. Size: {} bytes", pdfBytes.length);
             return pdfBytes;
         } catch (Exception e) {
-            System.err.println("Error converting HTML to PDF: " + e.getMessage());
-            System.err.println("HTML content preview (first 500 chars): " +
+            log.error("Error converting HTML to PDF: {}", e.getMessage());
+            log.error("HTML content preview (first 500 chars): {}",
                     (html != null && html.length() > 500 ? html.substring(0, 500) : html));
-            e.printStackTrace();
+            log.error("PDF conversion stacktrace", e);
             throw new IOException("Failed to convert HTML to PDF: " + e.getMessage(), e);
         }
     }

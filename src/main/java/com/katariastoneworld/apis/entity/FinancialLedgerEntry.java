@@ -24,7 +24,11 @@ public class FinancialLedgerEntry {
     public enum EventType {
         BILL_PAYMENT,
         ADVANCE_DEPOSIT,
-        CLIENT_PAYMENT_IN
+        CLIENT_PAYMENT_IN,
+        /** Generic expense debit rows (daily expenses, non-payroll direct expenses). */
+        EXPENSE_DEBIT,
+        /** Cash / bank paid to supplier (client module); mirrors unified CLIENT_OUT. */
+        CLIENT_PAYMENT_OUT
     }
 
     @Id

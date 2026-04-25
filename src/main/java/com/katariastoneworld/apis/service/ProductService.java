@@ -6,9 +6,12 @@ import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
 import com.katariastoneworld.apis.dto.ProductStockAsOfRowDTO;
 import com.katariastoneworld.apis.dto.StockAsOfResponseDTO;
+import com.katariastoneworld.apis.entity.BillKind;
 import com.katariastoneworld.apis.entity.InventoryActionType;
+import com.katariastoneworld.apis.entity.InventoryDirection;
+import com.katariastoneworld.apis.entity.InventoryReferenceType;
+import com.katariastoneworld.apis.entity.InventoryTxnType;
 import com.katariastoneworld.apis.entity.Product;
-import com.katariastoneworld.apis.repository.InventoryHistoryRepository;
 import com.katariastoneworld.apis.repository.ProductRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -16,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -32,10 +36,10 @@ public class ProductService {
     private ProductRepository productRepository;
 
     @Autowired
-    private InventoryHistoryRepository inventoryHistoryRepository;
+    private InventoryTransactionService inventoryTransactionService;
 
     @Autowired
-    private InventoryHistoryService inventoryHistoryService;
+    private InventoryReservationService inventoryReservationService;
 
     @Autowired
     private ProductChangeHistoryService productChangeHistoryService;
@@ -110,6 +114,11 @@ public class ProductService {
         }
         if (productRequestDTO.getHsnNumber() != null && !productRequestDTO.getHsnNumber().trim().isEmpty()) {
             product.setHsnNumber(productRequestDTO.getHsnNumber().trim());
+        }
+        if (productRequestDTO.getMinStock() != null) {
+            product.setMinStock(BigDecimal.valueOf(productRequestDTO.getMinStock()).setScale(2, RoundingMode.HALF_UP));
+        } else {
+            product.setMinStock(new BigDecimal("10.00"));
         }
 
         applySupplierDealerOnCreate(product, productRequestDTO, location);
@@ -266,6 +275,9 @@ public class ProductService {
             product.setHsnNumber(productRequestDTO.getHsnNumber().trim().isEmpty()
                     ? null : productRequestDTO.getHsnNumber().trim());
         }
+        if (productRequestDTO.getMinStock() != null) {
+            product.setMinStock(BigDecimal.valueOf(productRequestDTO.getMinStock()).setScale(2, RoundingMode.HALF_UP));
+        }
 
         applySupplierDealerOnUpdate(product, productRequestDTO, location);
         
@@ -334,14 +346,14 @@ public class ProductService {
         if (updateNotes != null && !updateNotes.isBlank()) {
             note = note + ". " + updateNotes.trim();
         }
-        inventoryHistoryService.saveInventoryHistory(
-                productId,
-                InventoryActionType.UPDATE,
-                next.subtract(prev),
-                prev,
-                next,
-                null,
-                note);
+        BigDecimal delta = next.subtract(prev);
+        if (delta.compareTo(BigDecimal.ZERO) > 0) {
+            inventoryTransactionService.append(productId, InventoryTxnType.ADJUSTMENT, InventoryDirection.IN,
+                    delta.abs(), InventoryReferenceType.MANUAL, null, null, note, null, null);
+        } else {
+            inventoryTransactionService.append(productId, InventoryTxnType.ADJUSTMENT, InventoryDirection.OUT,
+                    delta.abs(), InventoryReferenceType.MANUAL, null, null, note, null, null);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -370,12 +382,14 @@ public class ProductService {
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
         
         BigDecimal currentStock = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
+        BigDecimal reserved = inventoryReservationService.sumActiveReservedForProduct(productId);
+        BigDecimal available = currentStock.subtract(reserved);
         String unit = product.getUnit() != null ? product.getUnit() : "sqft";
-        BigDecimal newStock = currentStock.subtract(quantityToDeduct);
+        BigDecimal newStock = available.subtract(quantityToDeduct);
         
         if (newStock.compareTo(BigDecimal.ZERO) < 0) {
             throw new RuntimeException("Insufficient stock for product: " + product.getName() + 
-                    ". Available: " + currentStock + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
+                    ". Available (after reservations): " + available + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
     }
     
@@ -383,59 +397,79 @@ public class ProductService {
      * Deduct stock from a product by product ID (same behavior as before; audit row is appended when history is enabled).
      */
     public void deductStock(Long productId, BigDecimal quantityToDeduct) {
-        deductStock(productId, quantityToDeduct, null, "Stock deducted via bill");
+        deductStock(productId, quantityToDeduct, null, "Stock deducted via bill", null);
     }
 
     /**
-     * Deduct stock and record a SALE line in inventory history.
+     * Deduct cached stock and append a {@code SALE / OUT} ledger row (source of truth in {@code inventory_transactions}).
      *
-     * @param referenceId optional bill id (GST or Non-GST — disambiguate using notes in UI if needed)
+     * @param referenceId optional bill id
+     * @param billKind    optional GST / NON_GST for bill reference disambiguation
      */
-    public void deductStock(Long productId, BigDecimal quantityToDeduct, Long referenceId, String notes) {
-        Product product = productRepository.findById(productId)
+    public void deductStock(Long productId, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind) {
+        deductStock(productId, quantityToDeduct, referenceId, notes, billKind, null);
+    }
+
+    /**
+     * @param businessDate when supplied (e.g. bill date), inventory history filters by this day instead of physical insert time.
+     */
+    public void deductStock(Long productId, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
+            LocalDate businessDate) {
+        Product product = productRepository.findByIdForUpdate(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
 
         BigDecimal currentStock = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
+        BigDecimal reservedOthers = inventoryReservationService.sumActiveReservedExcludingBill(productId, referenceId, billKind);
+        BigDecimal available = currentStock.subtract(reservedOthers);
         String unit = product.getUnit() != null ? product.getUnit() : "sqft";
         BigDecimal newStock = currentStock.subtract(quantityToDeduct);
 
-        if (newStock.compareTo(BigDecimal.ZERO) < 0) {
+        if (available.subtract(quantityToDeduct).compareTo(BigDecimal.ZERO) < 0) {
             throw new RuntimeException("Insufficient stock for product: " + product.getName() +
-                    ". Available: " + currentStock + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
+                    ". Available (after reservations): " + available + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
 
-        BigDecimal previousQty = currentStock.setScale(2, RoundingMode.HALF_UP);
         BigDecimal scaledNew = newStock.setScale(2, RoundingMode.HALF_UP);
+        String billKindStr = billKind != null ? billKind.name() : null;
+        inventoryTransactionService.append(
+                productId,
+                InventoryTxnType.SALE,
+                InventoryDirection.OUT,
+                quantityToDeduct,
+                referenceId != null ? InventoryReferenceType.BILL : InventoryReferenceType.MANUAL,
+                referenceId,
+                billKindStr,
+                notes != null ? notes : "Stock deducted via bill",
+                product.getLocationId(),
+                businessDate);
         product.setQuantity(scaledNew);
         productRepository.save(product);
-
-        inventoryHistoryService.saveInventoryHistory(
-                productId,
-                InventoryActionType.SALE,
-                quantityToDeduct.negate(),
-                previousQty,
-                scaledNew,
-                referenceId,
-                notes != null ? notes : "Stock deducted via bill");
     }
 
     /**
      * Manual stock increase (admin). Persists product quantity and an ADD history row.
      */
     public ProductResponseDTO addStock(Long productId, BigDecimal quantityToAdd, String notes, String location) {
-        Product product = requireProductForLocation(productId, location);
+        Product product = productRepository.findByIdForUpdate(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
+        if (location == null || !location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + productId);
+        }
         BigDecimal previous = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
         BigDecimal newQty = previous.add(quantityToAdd).setScale(2, RoundingMode.HALF_UP);
+        inventoryTransactionService.append(
+                productId,
+                InventoryTxnType.PURCHASE,
+                InventoryDirection.IN,
+                quantityToAdd.setScale(2, RoundingMode.HALF_UP),
+                InventoryReferenceType.MANUAL,
+                null,
+                null,
+                notes != null && !notes.isBlank() ? notes.trim() : "Manual stock add",
+                product.getLocationId(),
+                null);
         product.setQuantity(newQty);
         Product saved = productRepository.save(product);
-        inventoryHistoryService.saveInventoryHistory(
-                productId,
-                InventoryActionType.ADD,
-                quantityToAdd.setScale(2, RoundingMode.HALF_UP),
-                previous.setScale(2, RoundingMode.HALF_UP),
-                newQty,
-                null,
-                notes != null && !notes.isBlank() ? notes.trim() : "Manual stock add");
         return convertToResponseDTO(saved);
     }
 
@@ -443,27 +477,36 @@ public class ProductService {
      * Manual stock set to an absolute quantity (admin). Persists and records UPDATE with delta.
      */
     public ProductResponseDTO updateStockToNewQuantity(Long productId, BigDecimal newQuantity, String notes, String location) {
-        Product product = requireProductForLocation(productId, location);
+        Product product = productRepository.findByIdForUpdate(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
+        if (location == null || !location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + productId);
+        }
         BigDecimal previous = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
         BigDecimal newQty = newQuantity.setScale(2, RoundingMode.HALF_UP);
         BigDecimal delta = newQty.subtract(previous).setScale(2, RoundingMode.HALF_UP);
+        if (delta.compareTo(BigDecimal.ZERO) > 0) {
+            inventoryTransactionService.append(productId, InventoryTxnType.ADJUSTMENT, InventoryDirection.IN,
+                    delta.abs(), InventoryReferenceType.MANUAL, null, null,
+                    notes != null && !notes.isBlank() ? notes.trim() : "Manual stock update",
+                    product.getLocationId(),
+                    null);
+        } else if (delta.compareTo(BigDecimal.ZERO) < 0) {
+            inventoryTransactionService.append(productId, InventoryTxnType.ADJUSTMENT, InventoryDirection.OUT,
+                    delta.abs(), InventoryReferenceType.MANUAL, null, null,
+                    notes != null && !notes.isBlank() ? notes.trim() : "Manual stock update",
+                    product.getLocationId(),
+                    null);
+        }
         product.setQuantity(newQty);
         Product saved = productRepository.save(product);
-        inventoryHistoryService.saveInventoryHistory(
-                productId,
-                InventoryActionType.UPDATE,
-                delta,
-                previous.setScale(2, RoundingMode.HALF_UP),
-                newQty,
-                null,
-                notes != null && !notes.isBlank() ? notes.trim() : "Manual stock update");
         return convertToResponseDTO(saved);
     }
 
     @Transactional(readOnly = true)
     public List<InventoryHistoryResponseDTO> getStockHistoryForProduct(Long productId, String location) {
         requireProductForLocation(productId, location);
-        return inventoryHistoryService.getHistoryForProduct(productId);
+        return inventoryTransactionService.getHistoryForProduct(productId);
     }
 
     @Transactional(readOnly = true)
@@ -476,7 +519,20 @@ public class ProductService {
         if (location == null || location.isBlank()) {
             throw new RuntimeException("Location is required");
         }
-        return inventoryHistoryService.getHistoryForLocation(location, from, to, actionType, limit);
+        int lim = limit != null ? Math.max(1, Math.min(5000, limit)) : 1000;
+        InventoryTxnType txnFilter = mapActionTypeToTxnType(actionType);
+        return inventoryTransactionService.getHistoryForLocation(location, from, to, txnFilter, lim);
+    }
+
+    private static InventoryTxnType mapActionTypeToTxnType(InventoryActionType actionType) {
+        if (actionType == null) {
+            return null;
+        }
+        return switch (actionType) {
+            case SALE -> InventoryTxnType.SALE;
+            case ADD -> InventoryTxnType.PURCHASE;
+            case UPDATE, ADJUST -> InventoryTxnType.ADJUSTMENT;
+        };
     }
 
     /**
@@ -499,11 +555,11 @@ public class ProductService {
         LocalDateTime afterStart = rangeStart != null ? rangeStart.plusDays(1).atStartOfDay() : null;
 
         Map<Long, BigDecimal> sumAfterEnd = toProductSumMap(
-                inventoryHistoryRepository.sumQuantityChangedByProductAfterInstant(loc, afterEnd));
+                inventoryTransactionService.sumSignedQuantityByProductAfterInstant(loc, afterEnd));
         Map<Long, BigDecimal> sumAfterStart = new HashMap<>();
         if (afterStart != null) {
             sumAfterStart.putAll(toProductSumMap(
-                    inventoryHistoryRepository.sumQuantityChangedByProductAfterInstant(loc, afterStart)));
+                    inventoryTransactionService.sumSignedQuantityByProductAfterInstant(loc, afterStart)));
         }
 
         List<Product> products = productRepository.findByLocation(loc);
@@ -537,9 +593,9 @@ public class ProductService {
         }
 
         String explanation =
-                "Quantities are derived from current stock minus every inventory movement logged after each selected date "
-                        + "(sales, stock adds, manual quantity updates). Products created after a date show no figure for that date. "
-                        + "If some past movements were never recorded in inventory history, older dates may be inaccurate.";
+                "Quantities are derived from current stock minus every signed movement in inventory_transactions after each selected date "
+                        + "(IN minus OUT). Products created after a date show no figure for that date. "
+                        + "If some past movements were never recorded in the ledger, older dates may be inaccurate.";
 
         return new StockAsOfResponseDTO(rangeEnd, rangeStart, rows, explanation);
     }
@@ -609,12 +665,66 @@ public class ProductService {
      * Deduct stock from a product by product name
      */
     public void deductStockByName(String productName, BigDecimal quantityToDeduct) {
-        deductStockByName(productName, quantityToDeduct, null, "Stock deducted via bill");
+        deductStockByName(productName, quantityToDeduct, null, "Stock deducted via bill", null);
     }
 
     public void deductStockByName(String productName, BigDecimal quantityToDeduct, Long referenceId, String notes) {
+        deductStockByName(productName, quantityToDeduct, referenceId, notes, null);
+    }
+
+    public void deductStockByName(String productName, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind) {
+        deductStockByName(productName, quantityToDeduct, referenceId, notes, billKind, null);
+    }
+
+    public void deductStockByName(String productName, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
+            LocalDate businessDate) {
         Product product = getProductEntityByName(productName);
-        deductStock(product.getId(), quantityToDeduct, referenceId, notes);
+        deductStock(product.getId(), quantityToDeduct, referenceId, notes, billKind, businessDate);
+    }
+
+    /**
+     * Ledger reversal for cancelled bill: {@code RETURN} / {@code IN} plus cached quantity increase.
+     */
+    public void recordBillStockReturn(Long productId, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location) {
+        recordBillStockReturn(productId, quantityToRestore, billId, billKind, notes, location, null);
+    }
+
+    public void recordBillStockReturn(Long productId, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
+            LocalDate businessDate) {
+        Product product = productRepository.findByIdForUpdate(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
+        if (location == null || !location.equals(product.getLocation())) {
+            throw new RuntimeException("Product not found with id: " + productId);
+        }
+        BigDecimal prev = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
+        BigDecimal qty = quantityToRestore.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal next = prev.add(qty).setScale(2, RoundingMode.HALF_UP);
+        inventoryTransactionService.append(
+                productId,
+                InventoryTxnType.RETURN,
+                InventoryDirection.IN,
+                qty,
+                InventoryReferenceType.BILL,
+                billId,
+                billKind != null ? billKind.name() : null,
+                notes != null ? notes : "Bill cancelled",
+                product.getLocationId(),
+                businessDate);
+        product.setQuantity(next);
+        productRepository.save(product);
+    }
+
+    public void recordBillStockReturnByName(String productName, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location) {
+        recordBillStockReturnByName(productName, quantityToRestore, billId, billKind, notes, location, null);
+    }
+
+    public void recordBillStockReturnByName(String productName, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
+            LocalDate businessDate) {
+        Product p = getProductEntityByName(productName);
+        if (location == null || !location.equals(p.getLocation())) {
+            throw new RuntimeException("Product not found with name: " + productName);
+        }
+        recordBillStockReturn(p.getId(), quantityToRestore, billId, billKind, notes, location, businessDate);
     }
 
     /**
@@ -628,7 +738,7 @@ public class ProductService {
         }
         addStock(product.getId(), quantityToAdd, notes, location);
     }
-    
+
     private ProductResponseDTO convertToResponseDTO(Product product) {
         ProductResponseDTO responseDTO = new ProductResponseDTO();
         responseDTO.setId(product.getId());
@@ -653,6 +763,7 @@ public class ProductService {
         responseDTO.setTransportationCharge(product.getTransportationCharge() != null ? product.getTransportationCharge().doubleValue() : null);
         responseDTO.setGstCharges(product.getGstCharges() != null ? product.getGstCharges().doubleValue() : null);
         responseDTO.setHsnNumber(product.getHsnNumber());
+        responseDTO.setMinStock(product.getMinStock() != null ? product.getMinStock().doubleValue() : null);
         if (product.getSupplier() != null) {
             responseDTO.setSupplierId(product.getSupplier().getId());
             responseDTO.setSupplierName(product.getSupplier().getName());

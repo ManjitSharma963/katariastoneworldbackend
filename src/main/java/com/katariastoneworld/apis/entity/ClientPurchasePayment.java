@@ -38,8 +38,8 @@ public class ClientPurchasePayment {
     private BigDecimal amount;
     
     @NotNull(message = "Date is required")
-    @Column(nullable = false)
-    private LocalDate date;
+    @Column(name = "payment_date", nullable = false)
+    private LocalDate paymentDate;
     
     @NotBlank(message = "Payment method is required")
     @Column(name = "payment_method", nullable = false, length = 50)
@@ -56,6 +56,9 @@ public class ClientPurchasePayment {
     
     @PrePersist
     protected void onCreate() {
+        if (paymentDate == null) {
+            paymentDate = LocalDate.now();
+        }
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }

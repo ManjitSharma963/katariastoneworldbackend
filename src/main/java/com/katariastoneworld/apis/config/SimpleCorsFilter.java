@@ -3,6 +3,8 @@ package com.katariastoneworld.apis.config;
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +15,7 @@ import java.io.IOException;
 
 @Configuration
 public class SimpleCorsFilter implements Filter {
+    private static final Logger log = LoggerFactory.getLogger(SimpleCorsFilter.class);
 
     @Value("${cors.allow-all-origins:true}")
     private boolean allowAllOrigins;
@@ -42,32 +45,31 @@ public class SimpleCorsFilter implements Filter {
         String requestURI = httpRequest.getRequestURI();
         
         // Log the request details
-        System.out.println("========================================");
-        System.out.println("[SimpleCorsFilter] Request: " + method + " " + requestURI);
-        System.out.println("[SimpleCorsFilter] Origin from request header: " + origin);
-        System.out.println("[SimpleCorsFilter] Allow all origins: " + allowAllOrigins);
+        log.info("[SimpleCorsFilter] Request: {} {}", method, requestURI);
+        log.info("[SimpleCorsFilter] Origin from request header: {}", origin);
+        log.info("[SimpleCorsFilter] Allow all origins: {}", allowAllOrigins);
         
         // Determine if origin is allowed
         boolean isOriginAllowed = false;
         if (origin != null) {
             if (allowAllOrigins) {
                 isOriginAllowed = true;
-                System.out.println("[SimpleCorsFilter] Allowing origin (global mode): " + origin);
+                log.info("[SimpleCorsFilter] Allowing origin (global mode): {}", origin);
             } else {
                 String[] allowedOrigins = allowedOriginsString.split(",\\s*");
                 for (String allowed : allowedOrigins) {
                     if (allowed.trim().equals(origin)) {
                         isOriginAllowed = true;
-                        System.out.println("[SimpleCorsFilter] Origin is in allowed list: " + origin);
+                        log.info("[SimpleCorsFilter] Origin is in allowed list: {}", origin);
                         break;
                     }
                 }
                 if (!isOriginAllowed) {
-                    System.out.println("[SimpleCorsFilter] Origin NOT in allowed list: " + origin);
+                    log.info("[SimpleCorsFilter] Origin NOT in allowed list: {}", origin);
                 }
             }
         } else {
-            System.out.println("[SimpleCorsFilter] No Origin header in request");
+            log.info("[SimpleCorsFilter] No Origin header in request");
         }
         
         // Handle preflight OPTIONS request
@@ -88,23 +90,21 @@ public class SimpleCorsFilter implements Filter {
                 
                 // Verify the header was set correctly before committing
                 String setHeader = httpResponse.getHeader("Access-Control-Allow-Origin");
-                System.out.println("[SimpleCorsFilter] Set Access-Control-Allow-Origin to: " + origin);
-                System.out.println("[SimpleCorsFilter] Verified header value: " + setHeader);
+                log.info("[SimpleCorsFilter] Set Access-Control-Allow-Origin to: {}", origin);
+                log.info("[SimpleCorsFilter] Verified header value: {}", setHeader);
                 
                 if (!origin.equals(setHeader)) {
-                    System.out.println("[SimpleCorsFilter] ERROR: Header mismatch! Forcing correct value...");
+                    log.error("[SimpleCorsFilter] Header mismatch! Forcing correct value...");
                     httpResponse.setHeader("Access-Control-Allow-Origin", origin);
                 }
                 
                 httpResponse.flushBuffer();
-                System.out.println("[SimpleCorsFilter] OPTIONS request handled successfully");
-                System.out.println("========================================");
+                log.info("[SimpleCorsFilter] OPTIONS request handled successfully");
                 return; // Don't continue filter chain
             } else {
                 httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 httpResponse.flushBuffer();
-                System.out.println("[SimpleCorsFilter] OPTIONS request rejected - origin not allowed");
-                System.out.println("========================================");
+                log.info("[SimpleCorsFilter] OPTIONS request rejected - origin not allowed");
                 return;
             }
         }
@@ -117,13 +117,11 @@ public class SimpleCorsFilter implements Filter {
             wrappedResponse.setHeader("Access-Control-Allow-Credentials", "true");
             wrappedResponse.setHeader("Access-Control-Expose-Headers", "Authorization, Content-Type");
             
-            System.out.println("[SimpleCorsFilter] Added CORS headers for " + method + " request from: " + origin);
+            log.info("[SimpleCorsFilter] Added CORS headers for {} request from: {}", method, origin);
             chain.doFilter(request, wrappedResponse);
         } else {
             chain.doFilter(request, response);
         }
-        
-        System.out.println("========================================");
     }
     
     // Response wrapper to prevent CORS header overrides
@@ -140,7 +138,7 @@ public class SimpleCorsFilter implements Filter {
             if ("Access-Control-Allow-Origin".equals(name)) {
                 // Always use the request origin, never allow it to be changed
                 if (!allowedOrigin.equals(value)) {
-                    System.out.println("[SimpleCorsFilter] BLOCKED attempt to change Access-Control-Allow-Origin from " + allowedOrigin + " to " + value);
+                    log.warn("[SimpleCorsFilter] BLOCKED attempt to change Access-Control-Allow-Origin from {} to {}", allowedOrigin, value);
                 }
                 super.setHeader(name, allowedOrigin);
             } else {
@@ -153,7 +151,7 @@ public class SimpleCorsFilter implements Filter {
             if ("Access-Control-Allow-Origin".equals(name)) {
                 // Always use the request origin
                 if (!allowedOrigin.equals(value)) {
-                    System.out.println("[SimpleCorsFilter] BLOCKED attempt to add Access-Control-Allow-Origin with wrong value: " + value);
+                    log.warn("[SimpleCorsFilter] BLOCKED attempt to add Access-Control-Allow-Origin with wrong value: {}", value);
                 }
                 super.setHeader(name, allowedOrigin); // Use setHeader to replace any existing value
             } else {

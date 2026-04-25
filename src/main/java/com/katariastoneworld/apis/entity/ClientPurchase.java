@@ -37,6 +37,10 @@ public class ClientPurchase {
     @NotNull(message = "Purchase date is required")
     @Column(nullable = false)
     private LocalDate purchaseDate;
+
+    /** When payment is due; may be set explicitly or defaulted from supplier payment terms. */
+    @Column(name = "due_date")
+    private LocalDate dueDate;
     
     @Column(columnDefinition = "TEXT")
     private String notes;

@@ -16,4 +16,11 @@ public class DailyBudgetRequestDTO {
     @NotNull(message = "Budget amount is required")
     @PositiveOrZero(message = "Budget amount must be positive or zero")
     private BigDecimal amount;
+
+    /**
+     * Optional source rail for budget increase:
+     * - CASH_UPI: increase in-hand daily budget
+     * - BANK_TRANSFER: increase bank opening balance only
+     */
+    private String fundingSource;
 }

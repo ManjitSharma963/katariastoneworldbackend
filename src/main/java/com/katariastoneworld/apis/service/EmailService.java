@@ -3,6 +3,8 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -16,6 +18,7 @@ import java.time.format.DateTimeFormatter;
 
 @Service
 public class EmailService {
+    private static final Logger log = LoggerFactory.getLogger(EmailService.class);
     
     @Autowired
     private JavaMailSender mailSender;
@@ -29,10 +32,10 @@ public class EmailService {
     
     @Async
     public void sendBillEmail(BillResponseDTO bill, String customerEmail) {
-        System.out.println("[ASYNC] Starting email sending process for bill: " + bill.getBillNumber());
+        log.info("[ASYNC] Starting email sending process for bill: {}", bill.getBillNumber());
         
         if (customerEmail == null || customerEmail.trim().isEmpty()) {
-            System.out.println("[ASYNC] No email address provided for customer. Skipping email send.");
+            log.info("[ASYNC] No email address provided for customer. Skipping email send.");
             return;
         }
         
@@ -50,26 +53,25 @@ public class EmailService {
             boolean pdfGenerated = false;
             
             try {
-                System.out.println("Generating PDF for bill: " + bill.getBillNumber());
+                log.info("Generating PDF for bill: {}", bill.getBillNumber());
                 // Check if this is a simple bill (no GST, no seller details)
                 // Use simple bill if: simpleBill flag is true OR taxPercentage is 0
                 boolean isSimpleBill = (bill.getSimpleBill() != null && bill.getSimpleBill()) 
                                      || (bill.getTaxPercentage() != null && bill.getTaxPercentage() == 0);
                 if (isSimpleBill) {
-                    System.out.println("Generating simple bill PDF (no GST, no seller details)");
+                    log.info("Generating simple bill PDF (no GST, no seller details)");
                     pdfBytes = pdfService.generateSimpleBillPdf(bill);
                 } else {
                     pdfBytes = pdfService.generateBillPdf(bill);
                 }
                 if (pdfBytes != null && pdfBytes.length > 0) {
                     pdfGenerated = true;
-                    System.out.println("PDF generated successfully. Size: " + pdfBytes.length + " bytes");
+                    log.info("PDF generated successfully. Size={} bytes", pdfBytes.length);
                 } else {
-                    System.err.println("PDF generation returned empty or null bytes");
+                    log.error("PDF generation returned empty or null bytes");
                 }
             } catch (Exception e) {
-                System.err.println("Failed to generate PDF attachment: " + e.getMessage());
-                e.printStackTrace();
+                log.error("Failed to generate PDF attachment", e);
                 // Continue - will send email without PDF
             }
             
@@ -80,24 +82,22 @@ public class EmailService {
             // Attach PDF if generated successfully
             if (pdfGenerated && pdfBytes != null) {
                 helper.addAttachment(pdfFileName, new ByteArrayResource(pdfBytes), "application/pdf");
-                System.out.println("PDF attachment added to email: " + pdfFileName);
+                log.info("PDF attachment added to email: {}", pdfFileName);
             } else {
-                System.out.println("Email will be sent without PDF attachment due to generation failure");
+                log.info("Email will be sent without PDF attachment due to generation failure");
             }
             
             mailSender.send(message);
             if (pdfGenerated) {
-                System.out.println("[ASYNC] Bill email with PDF attachment sent successfully to: " + customerEmail);
+                log.info("[ASYNC] Bill email with PDF attachment sent successfully to: {}", customerEmail);
             } else {
-                System.out.println("[ASYNC] Bill email sent successfully to: " + customerEmail + " (without PDF attachment)");
+                log.info("[ASYNC] Bill email sent successfully to: {} (without PDF attachment)", customerEmail);
             }
         } catch (MessagingException e) {
-            System.err.println("Error sending bill email to " + customerEmail + ": " + e.getMessage());
-            e.printStackTrace();
+            log.error("Error sending bill email to {}", customerEmail, e);
             // Don't throw exception - email failure shouldn't break bill creation
         } catch (Exception e) {
-            System.err.println("Unexpected error sending bill email: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Unexpected error sending bill email", e);
         }
     }
     
@@ -311,14 +311,12 @@ public class EmailService {
             helper.setText(emailBody, true);
             
             mailSender.send(message);
-            System.out.println("Test email sent successfully to: " + toEmail);
+            log.info("Test email sent successfully to: {}", toEmail);
         } catch (MessagingException e) {
-            System.err.println("Error sending test email to " + toEmail + ": " + e.getMessage());
-            e.printStackTrace();
+            log.error("Error sending test email to {}", toEmail, e);
             throw new RuntimeException("Failed to send test email: " + e.getMessage(), e);
         } catch (Exception e) {
-            System.err.println("Unexpected error sending test email: " + e.getMessage());
-            e.printStackTrace();
+            log.error("Unexpected error sending test email to {}", toEmail, e);
             throw new RuntimeException("Failed to send test email: " + e.getMessage(), e);
         }
     }
