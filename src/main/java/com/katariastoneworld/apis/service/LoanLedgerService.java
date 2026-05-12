@@ -38,9 +38,6 @@ public class LoanLedgerService {
     private LoanLedgerEntryRepository loanLedgerEntryRepository;
 
     @Autowired
-    private DailyBudgetService dailyBudgetService;
-
-    @Autowired
     private FinancialLedgerService financialLedgerService;
 
     /** Matches {@link #syncRepaymentLedger} — daily loan-category expenses get LOAN_REPAY, not EXPENSE, in unified ledger. */
@@ -90,14 +87,6 @@ public class LoanLedgerService {
                 LedgerSources.LOAN,
                 entry.getId(),
                 "Loan received lender=" + lender.getDisplayName());
-
-        if (affectsDailyBudget(mode)) {
-            dailyBudgetService.recordLoanReceipt(
-                    loc,
-                    body.getAmount(),
-                    lender.getDisplayName(),
-                    composeNotesWithMode(body.getNotes(), mode));
-        }
     }
 
     public void recordRepayment(Expense expense, Long lenderId) {
@@ -296,14 +285,7 @@ public class LoanLedgerService {
         if ("cheque".equals(v) || "check".equals(v)) return "cheque";
         if ("upi".equals(v)) return "upi";
         if ("cash".equals(v)) return "cash";
-        // Accept unknown string but treat it as non-budget affecting to be safe.
         return v;
-    }
-
-    private static boolean affectsDailyBudget(String paymentMode) {
-        if (paymentMode == null) return true;
-        String v = paymentMode.trim().toLowerCase(Locale.ROOT);
-        return "cash".equals(v) || "upi".equals(v);
     }
 
     private static String composeNotesWithMode(String notes, String mode) {

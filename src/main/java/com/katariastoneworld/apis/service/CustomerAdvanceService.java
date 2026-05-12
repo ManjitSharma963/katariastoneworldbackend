@@ -3,6 +3,8 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.CustomerAdvanceCreateRequestDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceHistoryEntryDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceResponseDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundRequestDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundResponseDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceSummaryDTO;
 import com.katariastoneworld.apis.entity.BillKind;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
@@ -81,8 +83,51 @@ public class CustomerAdvanceService {
         return toResponseDTO(saved);
     }
 
+    public CustomerAdvanceRefundResponseDTO refundAdvance(CustomerAdvanceRefundRequestDTO dto, String location) {
+        Customer customer = customerRepository.findByIdAndLocation(dto.getCustomerId(), location)
+                .orElseThrow(() -> new RuntimeException("Customer not found with id: " + dto.getCustomerId()));
+        BigDecimal amt = BigDecimal.valueOf(dto.getAmount()).setScale(2, RoundingMode.HALF_UP);
+        if (amt.compareTo(ZERO) <= 0) {
+            throw new IllegalArgumentException("Refund amount must be positive");
+        }
+        BigDecimal walletBalance = getWalletBalance(customer.getId());
+        if (amt.compareTo(walletBalance) > 0) {
+            throw new IllegalArgumentException(
+                    "Refund amount exceeds available wallet balance: " + walletBalance.toPlainString());
+        }
+        BillPaymentMode mode = parseAdvancePaymentMode(dto.getPaymentMode());
+
+        CustomerWalletTransaction walletTxn = new CustomerWalletTransaction();
+        walletTxn.setCustomer(customer);
+        walletTxn.setTxnType(CustomerWalletTransaction.TxnType.DEBIT);
+        walletTxn.setAmount(amt);
+        walletTxn.setSource("ADVANCE_REFUND");
+        walletTxn.setPaymentMode(mode);
+        walletTxn.setNotes(dto.getDescription() != null ? dto.getDescription().trim() : null);
+        walletTxn.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+        CustomerWalletTransaction saved = customerWalletTransactionRepository.save(walletTxn);
+
+        financialLedgerService.recordAdvanceRefund(location, customer.getId(), saved.getId(), mode, saved.getAmount(),
+                saved.getCreatedAt() != null ? saved.getCreatedAt().toLocalDate() : null);
+
+        CustomerAdvanceRefundResponseDTO response = new CustomerAdvanceRefundResponseDTO();
+        response.setCustomerId(customer.getId());
+        response.setRefundedAmount(saved.getAmount().doubleValue());
+        response.setRemainingWalletBalance(getWalletBalance(customer.getId()).doubleValue());
+        response.setPaymentMode(saved.getPaymentMode() != null ? saved.getPaymentMode().name() : null);
+        response.setDescription(saved.getNotes());
+        response.setWalletTransactionId(saved.getId());
+        return response;
+    }
+
     /** Wallet-ledger apply: debit from active balance for this bill reference. */
     public BigDecimal applyAdvanceFifo(Long customerId, BillKind billKind, Long billId, BigDecimal billTotal) {
+        return applyAdvanceFifo(customerId, billKind, billId, billTotal, null, null);
+    }
+
+    /** Wallet-ledger apply with optional mutation-group metadata. */
+    public BigDecimal applyAdvanceFifo(Long customerId, BillKind billKind, Long billId, BigDecimal billTotal,
+            Long billVersionId, String linkedGroupId) {
         Objects.requireNonNull(customerId);
         Objects.requireNonNull(billKind);
         Objects.requireNonNull(billId);
@@ -142,6 +187,8 @@ public class CustomerAdvanceService {
             // Carry forward original deposit mode so sales mode totals can bucket advance correctly.
             walletTxn.setPaymentMode(t.getPaymentMode() != null ? t.getPaymentMode() : BillPaymentMode.OTHER);
             walletTxn.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+            walletTxn.setBillVersionId(billVersionId);
+            walletTxn.setLinkedGroupId(linkedGroupId);
             customerWalletTransactionRepository.save(walletTxn);
 
             remainingNeeded = remainingNeeded.subtract(use).setScale(2, RoundingMode.HALF_UP);
@@ -161,14 +208,12 @@ public class CustomerAdvanceService {
 
     /** Reverse by inserting a CREDIT refund wallet transaction. */
     public void reverseAdvanceUsageForBill(BillKind billKind, Long billId) {
+        reverseAdvanceUsageForBill(billKind, billId, null, null);
+    }
+
+    /** Reverse by inserting CREDIT refund wallet transaction rows linked to original debits. */
+    public void reverseAdvanceUsageForBill(BillKind billKind, Long billId, Long billVersionId, String linkedGroupId) {
         String ref = walletReferenceForBill(billKind, billId);
-        BigDecimal used = nvl(customerWalletTransactionRepository.sumDebitByBillReference(
-                ref,
-                CustomerWalletTransaction.Status.ACTIVE,
-                CustomerWalletTransaction.TxnType.DEBIT));
-        if (used.compareTo(ZERO) <= 0) {
-            return;
-        }
         List<CustomerWalletTransaction> txns = customerWalletTransactionRepository
                 .findBySourceAndReferenceIdAndTxnTypeAndStatus(
                         "BILL_PAYMENT",
@@ -178,16 +223,24 @@ public class CustomerAdvanceService {
         if (txns.isEmpty()) {
             return;
         }
-        Customer customer = txns.get(0).getCustomer();
-        CustomerWalletTransaction refund = new CustomerWalletTransaction();
-        refund.setCustomer(customer);
-        refund.setTxnType(CustomerWalletTransaction.TxnType.CREDIT);
-        refund.setAmount(used);
-        refund.setSource("REFUND");
-        refund.setReferenceId(ref);
-        refund.setNotes("Bill cancelled");
-        refund.setStatus(CustomerWalletTransaction.Status.ACTIVE);
-        customerWalletTransactionRepository.save(refund);
+        for (CustomerWalletTransaction debit : txns) {
+            BigDecimal used = nvl(debit.getAmount()).setScale(2, RoundingMode.HALF_UP);
+            if (used.compareTo(ZERO) <= 0) {
+                continue;
+            }
+            CustomerWalletTransaction refund = new CustomerWalletTransaction();
+            refund.setCustomer(debit.getCustomer());
+            refund.setTxnType(CustomerWalletTransaction.TxnType.CREDIT);
+            refund.setAmount(used);
+            refund.setSource("REFUND");
+            refund.setReferenceId(ref);
+            refund.setNotes("Bill cancelled/replaced reversal");
+            refund.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+            refund.setReversalOfId(debit.getId());
+            refund.setBillVersionId(billVersionId);
+            refund.setLinkedGroupId(linkedGroupId);
+            customerWalletTransactionRepository.save(refund);
+        }
     }
 
     public Map<String, BigDecimal> sumAdvanceUsedGrouped(Collection<Long> gstBillIds, Collection<Long> nonGstBillIds) {
@@ -216,12 +269,22 @@ public class CustomerAdvanceService {
                 CustomerWalletTransaction.Status.ACTIVE,
                 CustomerWalletTransaction.TxnType.CREDIT,
                 "ADVANCE_DEPOSIT"));
-        // Usage on bills only (wallet debits from advance application).
-        BigDecimal totalUsed = nvl(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+        // Net usage on bills:
+        // BILL_PAYMENT debits minus REFUND credits (bill cancellation reversal).
+        BigDecimal grossUsedOnBills = nvl(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
                 customerId,
                 CustomerWalletTransaction.Status.ACTIVE,
                 CustomerWalletTransaction.TxnType.DEBIT,
                 "BILL_PAYMENT"));
+        BigDecimal reversedFromCancelledBills = nvl(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                customerId,
+                CustomerWalletTransaction.Status.ACTIVE,
+                CustomerWalletTransaction.TxnType.CREDIT,
+                "REFUND"));
+        BigDecimal totalUsed = grossUsedOnBills.subtract(reversedFromCancelledBills).setScale(2, RoundingMode.HALF_UP);
+        if (totalUsed.compareTo(ZERO) < 0) {
+            totalUsed = ZERO;
+        }
         BigDecimal totalRemaining = getWalletBalance(customerId).setScale(2, RoundingMode.HALF_UP);
         CustomerAdvanceSummaryDTO dto = new CustomerAdvanceSummaryDTO();
         dto.setTotalAdvance(totalAdvance.doubleValue());
@@ -236,7 +299,7 @@ public class CustomerAdvanceService {
         List<CustomerWalletTransaction> txns = customerWalletTransactionRepository.findByCustomer_IdOrderByCreatedAtDesc(customerId);
         List<CustomerAdvanceHistoryEntryDTO> entries = new ArrayList<>();
         for (CustomerWalletTransaction t : txns) {
-            String kind = t.getTxnType() == CustomerWalletTransaction.TxnType.CREDIT ? "DEPOSIT" : "USAGE";
+            String kind = resolveHistoryKind(t);
             Long billId = parseBillIdFromReference(t.getReferenceId());
             String billKind = parseBillKindFromReference(t.getReferenceId());
             entries.add(new CustomerAdvanceHistoryEntryDTO(
@@ -286,6 +349,29 @@ public class CustomerAdvanceService {
             return null;
         }
         return referenceId.split(":", 2)[0];
+    }
+
+    private static String resolveHistoryKind(CustomerWalletTransaction txn) {
+        if (txn == null) {
+            return "UNKNOWN";
+        }
+        String source = txn.getSource() != null ? txn.getSource().trim().toUpperCase() : "";
+        if (txn.getTxnType() == CustomerWalletTransaction.TxnType.CREDIT) {
+            if ("ADVANCE_DEPOSIT".equals(source)) {
+                return "DEPOSIT";
+            }
+            if ("REFUND".equals(source)) {
+                return "REVERSAL_CREDIT";
+            }
+            return "CREDIT";
+        }
+        if ("BILL_PAYMENT".equals(source)) {
+            return "USAGE";
+        }
+        if ("ADVANCE_REFUND".equals(source)) {
+            return "REFUND";
+        }
+        return "DEBIT";
     }
 
     private static CustomerAdvanceResponseDTO toResponseDTO(CustomerAdvance a) {

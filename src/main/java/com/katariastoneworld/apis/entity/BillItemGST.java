@@ -59,6 +59,12 @@ public class BillItemGST {
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal itemTotalPrice;
 
+    @Column(name = "version_no", nullable = false)
+    private Integer versionNo = 1;
+
+    @Column(name = "is_deleted", nullable = false)
+    private Boolean isDeleted = false;
+
     /** Copied from {@link Product#getHsnNumber()} (inventory) when the line is saved. */
     @Column(name = "hsn_number", length = 20)
     private String hsnNumber;

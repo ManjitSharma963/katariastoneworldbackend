@@ -130,6 +130,18 @@ public class BillGST {
     @Column(name = "is_supplementary", nullable = false)
     private Boolean supplementaryBill = false;
 
+    @Column(name = "current_version_no", nullable = false)
+    private Integer currentVersionNo = 1;
+
+    @Column(name = "original_bill_id")
+    private Long originalBillId;
+
+    @Column(name = "is_latest_version", nullable = false)
+    private Boolean latestVersion = true;
+
+    @Column(name = "bill_status", nullable = false, length = 50)
+    private String billStatus = "ACTIVE";
+
     @Column(name = "parent_bill_id")
     private Long parentBillId;
 

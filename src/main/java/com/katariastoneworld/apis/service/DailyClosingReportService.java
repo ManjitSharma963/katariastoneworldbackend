@@ -8,7 +8,21 @@ import com.katariastoneworld.apis.dto.PaymentModeTotalsDTO;
 import com.katariastoneworld.apis.dto.ReconciliationCauseDTO;
 import com.katariastoneworld.apis.dto.ReconciliationReportDTO;
 import com.katariastoneworld.apis.dto.SalesChargesSummaryDTO;
-import com.katariastoneworld.apis.entity.*;
+import com.katariastoneworld.apis.entity.BillGST;
+import com.katariastoneworld.apis.entity.BillKind;
+import com.katariastoneworld.apis.entity.BillNonGST;
+import com.katariastoneworld.apis.entity.BillPayment;
+import com.katariastoneworld.apis.entity.BillPaymentMode;
+import com.katariastoneworld.apis.entity.CustomerAdvance;
+import com.katariastoneworld.apis.entity.CustomerAdvanceUsage;
+import com.katariastoneworld.apis.entity.CustomerWalletTransaction;
+import com.katariastoneworld.apis.entity.ClientTransaction;
+import com.katariastoneworld.apis.entity.ClientTransactionType;
+import com.katariastoneworld.apis.entity.Customer;
+import com.katariastoneworld.apis.entity.DailyClosingSnapshot;
+import com.katariastoneworld.apis.entity.Expense;
+import com.katariastoneworld.apis.entity.MoneyDirection;
+import com.katariastoneworld.apis.entity.MoneyPaymentMode;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
@@ -16,9 +30,8 @@ import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.CustomerWalletTransactionRepository;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
-import com.katariastoneworld.apis.repository.FinancialLedgerRepository;
-import com.katariastoneworld.apis.repository.DailyBudgetRepository;
 import com.katariastoneworld.apis.repository.ClientTransactionRepository;
+import com.katariastoneworld.apis.repository.MoneyTransactionRepository;
 import com.katariastoneworld.apis.repository.DailyClosingSnapshotRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -77,16 +90,15 @@ public class DailyClosingReportService {
     private CustomerWalletTransactionRepository customerWalletTransactionRepository;
 
     @Autowired
-    private FinancialLedgerRepository financialLedgerRepository;
-
-    @Autowired
-    private DailyBudgetRepository dailyBudgetRepository;
+    private MoneyTransactionRepository moneyTransactionRepository;
 
     @Autowired
     private ClientTransactionRepository clientTransactionRepository;
 
     @Autowired
     private DailyClosingSnapshotRepository dailyClosingSnapshotRepository;
+
+    private static final List<MoneyPaymentMode> IN_HAND_PAYMENT_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
 
     /**
      * Single calendar day (same as {@link #buildReportForPeriod} with {@code from == to}).
@@ -837,20 +849,14 @@ public class DailyClosingReportService {
 
     public ReconciliationReportDTO reconciliation(LocalDate date, String location) {
         String loc = location == null ? "" : location.trim();
-        BigDecimal ledgerTotal = financialLedgerRepository
-                .sumInHandByLocationAndDateRange(loc, date, date)
-                .setScale(2, RoundingMode.HALF_UP);
-
-        DailyBudget budget = dailyBudgetRepository.findFirstByLocationAndUserIdIsNull(loc)
-                .or(() -> dailyBudgetRepository.findByLocation(loc))
-                .orElse(null);
+        BigDecimal cashUpiIn = nvl(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
+                loc, date, date, MoneyDirection.IN, IN_HAND_PAYMENT_MODES));
+        BigDecimal cashUpiOut = nvl(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
+                loc, date, date, MoneyDirection.OUT, IN_HAND_PAYMENT_MODES));
+        BigDecimal ledgerTotal = cashUpiIn.subtract(cashUpiOut).setScale(2, RoundingMode.HALF_UP);
         BigDecimal budgetNetMovement = ZERO.setScale(2, RoundingMode.HALF_UP);
-        if (budget != null && budget.getAmount() != null && budget.getRemainingBudget() != null) {
-            // Movement produced by collection adjustments beyond planned budget-spend baseline.
-            budgetNetMovement = budget.getRemainingBudget().subtract(budget.getAmount()).setScale(2, RoundingMode.HALF_UP);
-        }
         BigDecimal delta = ledgerTotal.subtract(budgetNetMovement).setScale(2, RoundingMode.HALF_UP);
-        boolean ok = delta.abs().compareTo(new BigDecimal("0.02")) <= 0;
+        boolean ok = true;
         List<ReconciliationCauseDTO> causes = buildReconciliationCauses(date, loc);
         return ReconciliationReportDTO.builder()
                 .location(loc)
@@ -859,7 +865,7 @@ public class DailyClosingReportService {
                 .budgetNetMovement(budgetNetMovement.doubleValue())
                 .delta(delta.doubleValue())
                 .level(ok ? "OK" : "WARNING")
-                .message(ok ? "Ledger and budget are reconciled." : "Mismatch between ledger and budget movements.")
+                .message("CASH/UPI net for the day from transactions; daily_budget table removed.")
                 .possibleCauses(causes)
                 .build();
     }

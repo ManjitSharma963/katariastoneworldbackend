@@ -51,6 +51,18 @@ public class InventoryTransaction {
     @Column(name = "bill_kind", length = 16)
     private String billKind;
 
+    @Column(name = "bill_version_id")
+    private Long billVersionId;
+
+    @Column(name = "reversal_of_id")
+    private Long reversalOfId;
+
+    @Column(name = "linked_group_id", length = 64)
+    private String linkedGroupId;
+
+    @Column(name = "source_action", length = 50)
+    private String sourceAction;
+
     @Column(length = 255)
     private String notes;
 

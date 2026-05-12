@@ -4,6 +4,7 @@ import com.katariastoneworld.apis.dto.DealerRequestDTO;
 import com.katariastoneworld.apis.dto.DealerResponseDTO;
 import com.katariastoneworld.apis.entity.Dealer;
 import com.katariastoneworld.apis.repository.DealerRepository;
+import com.katariastoneworld.apis.util.PhoneNumbers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +23,7 @@ public class DealerService {
         final String loc = location == null ? "" : location.trim();
         Dealer d = new Dealer();
         d.setName(dto.getName().trim());
-        d.setContactNumber(trimToNull(dto.getContactNumber()));
+        d.setContactNumber(PhoneNumbers.requireExactlyTenDigits(dto.getContactNumber(), "Contact number"));
         d.setAddress(trimToNull(dto.getAddress()));
         d.setLocation(loc);
         Dealer saved = dealerRepository.save(d);

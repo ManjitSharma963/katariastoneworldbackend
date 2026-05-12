@@ -2,10 +2,10 @@ package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.BalanceSummaryDTO;
 import com.katariastoneworld.apis.dto.UnifiedLedgerTransactionDTO;
-import com.katariastoneworld.apis.entity.LedgerPaymentMode;
-import com.katariastoneworld.apis.entity.LedgerTransactionType;
-import com.katariastoneworld.apis.entity.UnifiedFinancialLedgerEntry;
-import com.katariastoneworld.apis.repository.UnifiedFinancialLedgerRepository;
+import com.katariastoneworld.apis.entity.MoneyDirection;
+import com.katariastoneworld.apis.entity.MoneyPaymentMode;
+import com.katariastoneworld.apis.entity.MoneyTransaction;
+import com.katariastoneworld.apis.repository.MoneyTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Phase 3: balances from {@code unified_financial_ledger} (CREDIT − DEBIT per payment rail), not {@code daily_budget_events}.
+ * Balances and ledger listings from {@code transactions} (CASH/UPI vs BANK rails).
  */
 @Service
 @Transactional(readOnly = true)
@@ -27,27 +27,24 @@ public class BalanceSummaryService {
 
     private static final BigDecimal ZERO = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
-    private static final List<LedgerPaymentMode> IN_HAND_MODES = List.of(LedgerPaymentMode.CASH, LedgerPaymentMode.UPI);
-    private static final List<LedgerPaymentMode> BANK_MODES = List.of(
-            LedgerPaymentMode.BANK, LedgerPaymentMode.CARD, LedgerPaymentMode.CHEQUE);
+    private static final List<MoneyPaymentMode> IN_HAND_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
+    private static final List<MoneyPaymentMode> BANK_MODES = List.of(MoneyPaymentMode.BANK);
 
     @Autowired
-    private UnifiedFinancialLedgerRepository unifiedFinancialLedgerRepository;
+    private MoneyTransactionRepository moneyTransactionRepository;
 
     public BalanceSummaryDTO getSummary(String location) {
         if (location == null || location.isBlank()) {
             return emptySummary();
         }
         String loc = location.trim();
-        BigDecimal inHand = scale2(unifiedFinancialLedgerRepository.sumNetSignedByLocationAndPaymentModes(
-                loc, LedgerTransactionType.CREDIT, IN_HAND_MODES));
-        BigDecimal bank = scale2(unifiedFinancialLedgerRepository.sumNetSignedByLocationAndPaymentModes(
-                loc, LedgerTransactionType.CREDIT, BANK_MODES));
+        BigDecimal inHand = scale2(moneyTransactionRepository.sumNetSignedByLocationAndPaymentModes(loc, IN_HAND_MODES));
+        BigDecimal bank = scale2(moneyTransactionRepository.sumNetSignedByLocationAndPaymentModes(loc, BANK_MODES));
         LocalDate today = LocalDate.now();
-        BigDecimal todayDebitCashUpi = scale2(unifiedFinancialLedgerRepository.sumAmountByLocationDateRangeTypeModes(
-                loc, today, today, LedgerTransactionType.DEBIT, IN_HAND_MODES));
-        BigDecimal todayDebitBank = scale2(unifiedFinancialLedgerRepository.sumAmountByLocationDateRangeTypeModes(
-                loc, today, today, LedgerTransactionType.DEBIT, BANK_MODES));
+        BigDecimal todayDebitCashUpi = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
+                loc, today, today, MoneyDirection.OUT, IN_HAND_MODES));
+        BigDecimal todayDebitBank = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
+                loc, today, today, MoneyDirection.OUT, BANK_MODES));
         BalanceSummaryDTO dto = new BalanceSummaryDTO();
         dto.setInHand(inHand);
         dto.setBank(bank);
@@ -67,15 +64,15 @@ public class BalanceSummaryService {
         return d;
     }
 
-    /** Sum of absolute debit amounts on CASH+UPI in range (replaces {@code daily_budget_events} expense slice). */
+    /** Sum of OUT amounts on CASH+UPI in range (expense / in-hand outflows). */
     public BigDecimal sumDebitCashUpiInRange(String location, LocalDate from, LocalDate to) {
         if (location == null || location.isBlank()) {
             return ZERO;
         }
         LocalDate f = from != null ? from : LocalDate.now();
         LocalDate t = to != null ? to : f;
-        return scale2(unifiedFinancialLedgerRepository.sumAmountByLocationDateRangeTypeModes(
-                location.trim(), f, t, LedgerTransactionType.DEBIT, IN_HAND_MODES));
+        return scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
+                location.trim(), f, t, MoneyDirection.OUT, IN_HAND_MODES));
     }
 
     public List<UnifiedLedgerTransactionDTO> listTransactions(String location, LocalDate from, LocalDate to, int limit) {
@@ -91,24 +88,25 @@ public class BalanceSummaryService {
             t = swap;
         }
         int lim = Math.max(1, Math.min(limit, 2000));
-        return unifiedFinancialLedgerRepository
-                .findByLocationAndTxnDateBetweenOrderByTxnDateDescCreatedAtDescIdDesc(loc, f, t, PageRequest.of(0, lim))
+        return moneyTransactionRepository
+                .findByLocationAndTransactionDateBetweenAndIsDeletedFalseOrderByTransactionDateDescDateTimeDescIdDesc(
+                        loc, f, t, PageRequest.of(0, lim))
                 .getContent()
                 .stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
-    private UnifiedLedgerTransactionDTO toDto(UnifiedFinancialLedgerEntry e) {
+    private UnifiedLedgerTransactionDTO toDto(MoneyTransaction e) {
         UnifiedLedgerTransactionDTO d = new UnifiedLedgerTransactionDTO();
         d.setId(e.getId());
-        d.setTxnDate(e.getTxnDate());
-        d.setTxnType(e.getTxnType() != null ? e.getTxnType().name() : null);
+        d.setTxnDate(e.getTransactionDate() != null ? e.getTransactionDate() : (e.getDateTime() != null ? e.getDateTime().toLocalDate() : null));
+        d.setTxnType(e.getDirection() != null ? e.getDirection().name() : null);
         d.setAmount(e.getAmount());
         d.setPaymentMode(e.getPaymentMode() != null ? e.getPaymentMode().name() : null);
-        d.setSource(e.getSource());
+        d.setSource(e.getCategory() != null ? e.getCategory().name() : null);
         d.setReferenceId(e.getReferenceId());
-        d.setDescription(e.getDescription());
+        d.setDescription(e.getNotes());
         d.setCreatedAt(e.getCreatedAt());
         return d;
     }

@@ -14,6 +14,7 @@ public class DealerRequestDTO {
     @NotBlank(message = "Dealer name is required")
     private String name;
 
+    @NotBlank(message = "Contact number is required")
     @JsonAlias({ "contact_number", "contactNumber" })
     private String contactNumber;
 

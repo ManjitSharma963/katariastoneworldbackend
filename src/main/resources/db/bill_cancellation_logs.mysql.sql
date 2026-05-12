@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS bill_cancellation_logs (
     payment_status VARCHAR(32) NULL,
     cancelled_at DATETIME(6) NOT NULL,
     cancelled_by_user_id BIGINT NULL,
+    cancellation_reason TEXT NULL,
     INDEX idx_bill_cancel_loc_bill_date (location, bill_date),
     INDEX idx_bill_cancel_loc_cancelled_at (location, cancelled_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

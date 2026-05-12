@@ -20,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -415,6 +414,11 @@ public class ProductService {
      */
     public void deductStock(Long productId, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
             LocalDate businessDate) {
+        deductStock(productId, quantityToDeduct, referenceId, notes, billKind, businessDate, null, null, null, null);
+    }
+
+    public void deductStock(Long productId, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
+            LocalDate businessDate, Long billVersionId, Long reversalOfId, String linkedGroupId, String sourceAction) {
         Product product = productRepository.findByIdForUpdate(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
 
@@ -441,7 +445,11 @@ public class ProductService {
                 billKindStr,
                 notes != null ? notes : "Stock deducted via bill",
                 product.getLocationId(),
-                businessDate);
+                businessDate,
+                billVersionId,
+                reversalOfId,
+                linkedGroupId,
+                sourceAction);
         product.setQuantity(scaledNew);
         productRepository.save(product);
     }
@@ -678,8 +686,14 @@ public class ProductService {
 
     public void deductStockByName(String productName, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
             LocalDate businessDate) {
+        deductStockByName(productName, quantityToDeduct, referenceId, notes, billKind, businessDate, null, null, null, null);
+    }
+
+    public void deductStockByName(String productName, BigDecimal quantityToDeduct, Long referenceId, String notes, BillKind billKind,
+            LocalDate businessDate, Long billVersionId, Long reversalOfId, String linkedGroupId, String sourceAction) {
         Product product = getProductEntityByName(productName);
-        deductStock(product.getId(), quantityToDeduct, referenceId, notes, billKind, businessDate);
+        deductStock(product.getId(), quantityToDeduct, referenceId, notes, billKind, businessDate,
+                billVersionId, reversalOfId, linkedGroupId, sourceAction);
     }
 
     /**
@@ -691,6 +705,11 @@ public class ProductService {
 
     public void recordBillStockReturn(Long productId, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
             LocalDate businessDate) {
+        recordBillStockReturn(productId, quantityToRestore, billId, billKind, notes, location, businessDate, null, null, null, null);
+    }
+
+    public void recordBillStockReturn(Long productId, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
+            LocalDate businessDate, Long billVersionId, Long reversalOfId, String linkedGroupId, String sourceAction) {
         Product product = productRepository.findByIdForUpdate(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found with id: " + productId));
         if (location == null || !location.equals(product.getLocation())) {
@@ -699,6 +718,12 @@ public class ProductService {
         BigDecimal prev = product.getQuantity() != null ? product.getQuantity() : BigDecimal.ZERO;
         BigDecimal qty = quantityToRestore.setScale(2, RoundingMode.HALF_UP);
         BigDecimal next = prev.add(qty).setScale(2, RoundingMode.HALF_UP);
+        Long effectiveReversalOfId = reversalOfId;
+        if (effectiveReversalOfId == null && billId != null && billKind != null) {
+            effectiveReversalOfId = inventoryTransactionService
+                    .findLatestBillSaleTransactionId(productId, billId, billKind)
+                    .orElse(null);
+        }
         inventoryTransactionService.append(
                 productId,
                 InventoryTxnType.RETURN,
@@ -709,7 +734,11 @@ public class ProductService {
                 billKind != null ? billKind.name() : null,
                 notes != null ? notes : "Bill cancelled",
                 product.getLocationId(),
-                businessDate);
+                businessDate,
+                billVersionId,
+                effectiveReversalOfId,
+                linkedGroupId,
+                sourceAction);
         product.setQuantity(next);
         productRepository.save(product);
     }
@@ -720,11 +749,18 @@ public class ProductService {
 
     public void recordBillStockReturnByName(String productName, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
             LocalDate businessDate) {
+        recordBillStockReturnByName(productName, quantityToRestore, billId, billKind, notes, location, businessDate,
+                null, null, null, null);
+    }
+
+    public void recordBillStockReturnByName(String productName, BigDecimal quantityToRestore, Long billId, BillKind billKind, String notes, String location,
+            LocalDate businessDate, Long billVersionId, Long reversalOfId, String linkedGroupId, String sourceAction) {
         Product p = getProductEntityByName(productName);
         if (location == null || !location.equals(p.getLocation())) {
             throw new RuntimeException("Product not found with name: " + productName);
         }
-        recordBillStockReturn(p.getId(), quantityToRestore, billId, billKind, notes, location, businessDate);
+        recordBillStockReturn(p.getId(), quantityToRestore, billId, billKind, notes, location, businessDate,
+                billVersionId, reversalOfId, linkedGroupId, sourceAction);
     }
 
     /**

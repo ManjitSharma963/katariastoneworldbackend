@@ -57,6 +57,15 @@ public class CustomerWalletTransaction {
     @Column(name = "reference_id", length = 64)
     private String referenceId;
 
+    @Column(name = "reversal_of_id")
+    private Long reversalOfId;
+
+    @Column(name = "bill_version_id")
+    private Long billVersionId;
+
+    @Column(name = "linked_group_id", length = 64)
+    private String linkedGroupId;
+
     @Column(length = 500)
     private String notes;
 

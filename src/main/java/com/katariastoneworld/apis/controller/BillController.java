@@ -1,6 +1,7 @@
 package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
+import com.katariastoneworld.apis.dto.BillCancelRequestDTO;
 import com.katariastoneworld.apis.dto.BillLineQuantitiesPatchRequestDTO;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
@@ -374,10 +375,12 @@ public class BillController {
     public ResponseEntity<Void> deleteBillByTypeAndId(
             @PathVariable String billType,
             @PathVariable Long id,
+            @Valid @RequestBody(required = false) BillCancelRequestDTO cancelBody,
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         Long userId = RequestUtil.getUserIdFromRequest(request);
-        billService.deleteBill(id, billType, location, userId);
+        String reason = cancelBody != null ? cancelBody.getReason() : null;
+        billService.deleteBill(id, billType, location, userId, reason);
         return ResponseEntity.noContent().build();
     }
 
@@ -385,10 +388,12 @@ public class BillController {
     @RequiresRole({ "user", "admin" })
     public ResponseEntity<Void> deleteBillById(
             @PathVariable Long id,
+            @Valid @RequestBody(required = false) BillCancelRequestDTO cancelBody,
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         Long userId = RequestUtil.getUserIdFromRequest(request);
-        billService.deleteBillById(id, location, userId);
+        String reason = cancelBody != null ? cancelBody.getReason() : null;
+        billService.deleteBillById(id, location, userId, reason);
         return ResponseEntity.noContent().build();
     }
 

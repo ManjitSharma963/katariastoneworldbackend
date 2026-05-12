@@ -1,5 +1,7 @@
 package com.katariastoneworld.apis.repository;
 
+import com.katariastoneworld.apis.entity.InventoryDirection;
+import com.katariastoneworld.apis.entity.InventoryReferenceType;
 import com.katariastoneworld.apis.entity.InventoryTransaction;
 import com.katariastoneworld.apis.entity.InventoryTxnType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,11 +13,24 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, Long> {
 
     List<InventoryTransaction> findByProductIdOrderByCreatedAtDesc(Long productId);
+
+    /**
+     * Latest bill sale row for this product still treated as an originating sale (not itself a reversal target row).
+     * Used to set {@code reversal_of_id} on RETURN / IN rows.
+     */
+    Optional<InventoryTransaction> findFirstByProductIdAndReferenceTypeAndReferenceIdAndBillKindAndTxnTypeAndDirectionAndReversalOfIdIsNullOrderByIdDesc(
+            Long productId,
+            InventoryReferenceType referenceType,
+            Long referenceId,
+            String billKind,
+            InventoryTxnType txnType,
+            InventoryDirection direction);
 
     /**
      * Sum of signed quantity changes per product for movements on or after {@code afterInstant}

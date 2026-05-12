@@ -32,6 +32,15 @@ public class BillPayment {
     @Column(name = "source_type", length = 32)
     private String sourceType;
 
+    @Column(name = "bill_version_id")
+    private Long billVersionId;
+
+    @Column(name = "reversal_of_id")
+    private Long reversalOfId;
+
+    @Column(name = "payment_status", nullable = false, length = 50)
+    private String paymentStatus = "ACTIVE";
+
     @Column(nullable = false, precision = 14, scale = 2)
     private BigDecimal amount;
 

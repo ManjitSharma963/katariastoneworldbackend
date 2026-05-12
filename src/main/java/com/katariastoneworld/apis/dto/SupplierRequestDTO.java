@@ -14,6 +14,10 @@ public class SupplierRequestDTO {
     @NotBlank(message = "Supplier name is required")
     private String name;
 
+    /**
+     * Required: exactly 10 digits after stripping non-digits (validated in {@link com.katariastoneworld.apis.service.SupplierService}).
+     */
+    @NotBlank(message = "Contact number is required")
     @JsonAlias({ "contact_number", "contactNumber" })
     private String contactNumber;
 

@@ -7,7 +7,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
-/** One row from {@code unified_financial_ledger} for UI transaction history. */
+/** One row from {@code transactions} for UI transaction history (balance API). */
 @Data
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class UnifiedLedgerTransactionDTO {

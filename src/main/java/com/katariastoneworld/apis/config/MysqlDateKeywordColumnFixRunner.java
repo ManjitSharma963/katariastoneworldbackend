@@ -33,7 +33,6 @@ public class MysqlDateKeywordColumnFixRunner implements ApplicationRunner {
         try {
             fixClientPurchasePayments();
             fixExpenses();
-            fixDailyBudgetEvents();
         } catch (Exception e) {
             log.warn("MySQL date-column compatibility fix failed (non-fatal): {}", e.getMessage(), e);
         }
@@ -102,24 +101,4 @@ public class MysqlDateKeywordColumnFixRunner implements ApplicationRunner {
         }
     }
 
-    private void fixDailyBudgetEvents() {
-        final String t = "daily_budget_events";
-        if (!tableExists(t)) {
-            return;
-        }
-        boolean hasDate = columnExists(t, "date");
-        boolean hasEventDate = columnExists(t, "event_date");
-        if (hasDate && hasEventDate) {
-            jdbcTemplate.execute(
-                    "UPDATE `" + t + "` SET event_date = COALESCE(event_date, `date`)"
-            );
-            jdbcTemplate.execute("ALTER TABLE `" + t + "` DROP COLUMN `date`");
-            log.info("Applied fix: {} had both `date` and event_date; merged into event_date and dropped `date`.", t);
-            return;
-        }
-        if (hasDate && !hasEventDate) {
-            jdbcTemplate.execute("ALTER TABLE `" + t + "` CHANGE COLUMN `date` event_date DATE NOT NULL");
-            log.info("Applied fix: renamed {}.`date` -> event_date (MySQL keyword / 1364 safety).", t);
-        }
-    }
 }

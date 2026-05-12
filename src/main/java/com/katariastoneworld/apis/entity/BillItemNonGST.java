@@ -58,6 +58,12 @@ public class BillItemNonGST {
     @NotNull(message = "Item total price is required")
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal itemTotalPrice;
+
+    @Column(name = "version_no", nullable = false)
+    private Integer versionNo = 1;
+
+    @Column(name = "is_deleted", nullable = false)
+    private Boolean isDeleted = false;
     
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;

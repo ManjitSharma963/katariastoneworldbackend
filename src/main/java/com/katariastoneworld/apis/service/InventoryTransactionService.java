@@ -12,6 +12,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -48,6 +49,25 @@ public class InventoryTransactionService {
             String notes,
             Long locationId,
             LocalDate businessDate) {
+        return append(productId, txnType, direction, quantity, referenceType, referenceId, billKind, notes,
+                locationId, businessDate, null, null, null, null);
+    }
+
+    public InventoryTransaction append(
+            Long productId,
+            InventoryTxnType txnType,
+            InventoryDirection direction,
+            BigDecimal quantity,
+            InventoryReferenceType referenceType,
+            Long referenceId,
+            String billKind,
+            String notes,
+            Long locationId,
+            LocalDate businessDate,
+            Long billVersionId,
+            Long reversalOfId,
+            String linkedGroupId,
+            String sourceAction) {
         InventoryTransaction row = new InventoryTransaction();
         row.setProductId(productId);
         row.setTxnType(txnType);
@@ -59,7 +79,30 @@ public class InventoryTransactionService {
         row.setNotes(truncateNotes(notes));
         row.setLocationId(locationId);
         row.setBusinessDate(businessDate);
+        row.setBillVersionId(billVersionId);
+        row.setReversalOfId(reversalOfId);
+        row.setLinkedGroupId(linkedGroupId);
+        row.setSourceAction(sourceAction);
         return inventoryTransactionRepository.save(row);
+    }
+
+    /**
+     * Most recent originating {@code SALE}/{@code OUT} for this bill line, for linking {@code reversal_of_id} on returns.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Long> findLatestBillSaleTransactionId(Long productId, Long billId, BillKind billKind) {
+        if (productId == null || billId == null || billKind == null) {
+            return Optional.empty();
+        }
+        return inventoryTransactionRepository
+                .findFirstByProductIdAndReferenceTypeAndReferenceIdAndBillKindAndTxnTypeAndDirectionAndReversalOfIdIsNullOrderByIdDesc(
+                        productId,
+                        InventoryReferenceType.BILL,
+                        billId,
+                        billKind.name(),
+                        InventoryTxnType.SALE,
+                        InventoryDirection.OUT)
+                .map(InventoryTransaction::getId);
     }
 
     @Transactional(readOnly = true)

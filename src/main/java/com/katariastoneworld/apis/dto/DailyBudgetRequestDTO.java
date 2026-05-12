@@ -23,4 +23,11 @@ public class DailyBudgetRequestDTO {
      * - BANK_TRANSFER: increase bank opening balance only
      */
     private String fundingSource;
+
+    /**
+     * Optional adjustment intent:
+     * - INCREASE (default): add amount to selected budget rail
+     * - DECREASE: subtract amount from selected budget rail
+     */
+    private String adjustmentType;
 }

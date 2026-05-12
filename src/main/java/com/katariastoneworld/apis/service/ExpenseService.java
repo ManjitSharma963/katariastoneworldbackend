@@ -4,7 +4,6 @@ import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
 import com.katariastoneworld.apis.dto.ExpenseResponseDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
-import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerSources;
 import com.katariastoneworld.apis.entity.LedgerTransactionType;
@@ -29,9 +28,6 @@ public class ExpenseService {
     
     @Autowired
     private ExpenseRepository expenseRepository;
-
-    @Autowired
-    private DailyBudgetService dailyBudgetService;
 
     @Autowired
     private LoanLedgerService loanLedgerService;
@@ -76,11 +72,6 @@ public class ExpenseService {
         Expense savedExpense = expenseRepository.save(expense);
         log.info("expense_create location={} id={} amount={} category={} date={}",
                 location, savedExpense.getId(), savedExpense.getAmount(), savedExpense.getCategory(), savedExpense.getDate());
-        if (LocalDate.now().equals(savedExpense.getDate())
-                && savedExpense.getAmount() != null
-                && shouldAffectDailyInHandBudget(savedExpense)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, savedExpense.getAmount().negate());
-        }
         loanLedgerService.syncRepaymentLedger(savedExpense, requestDTO.getLenderId());
         syncUnifiedLedgerForExpense(savedExpense);
         return convertToResponseDTO(savedExpense);
@@ -151,15 +142,6 @@ public class ExpenseService {
         Expense updatedExpense = expenseRepository.save(expense);
         log.info("expense_update location={} id={} amount={} category={} date={}",
                 location, updatedExpense.getId(), updatedExpense.getAmount(), updatedExpense.getCategory(), updatedExpense.getDate());
-        LocalDate today = LocalDate.now();
-        if (today.equals(oldDate) && shouldAffectDailyInHandBudget(oldExpenseSnapshot)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, oldAmount != null ? oldAmount : BigDecimal.ZERO);
-        }
-        if (today.equals(updatedExpense.getDate())
-                && updatedExpense.getAmount() != null
-                && shouldAffectDailyInHandBudget(updatedExpense)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, updatedExpense.getAmount().negate());
-        }
         loanLedgerService.syncRepaymentLedger(updatedExpense, requestDTO.getLenderId());
         syncUnifiedLedgerForExpense(updatedExpense);
         return convertToResponseDTO(updatedExpense);
@@ -175,11 +157,6 @@ public class ExpenseService {
         financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
         financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
         financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
-        if (LocalDate.now().equals(expense.getDate())
-                && expense.getAmount() != null
-                && shouldAffectDailyInHandBudget(expense)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(expense.getLocation(), expense.getAmount());
-        }
         log.info("expense_delete location={} id={} amount={} date={}",
                 expense.getLocation(), expense.getId(), expense.getAmount(), expense.getDate());
         expense.setIsDeleted(true);
@@ -187,7 +164,6 @@ public class ExpenseService {
     }
 
     /**
-     * Dual-write Phase 2: {@code unified_financial_ledger} via {@link FinancialLedgerService#recordTransaction}.
      * Payroll-mirrored expenses use SALARY_* only; synced loan repayments use LOAN_REPAY from {@link LoanLedgerService}.
      */
     private void syncUnifiedLedgerForExpense(Expense expense) {
@@ -210,20 +186,6 @@ public class ExpenseService {
             financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
             return;
         }
-        BillPaymentMode mode;
-        try {
-            mode = BillPaymentMode.parseFlexible(expense.getPaymentMethod());
-        } catch (Exception ex) {
-            mode = BillPaymentMode.OTHER;
-        }
-        financialLedgerService.syncExpenseDebit(
-                expense.getLocation(),
-                expense.getId(),
-                mode,
-                expense.getAmount(),
-                expense.getDate(),
-                expense.getDescription(),
-                true);
         financialLedgerService.recordTransaction(
                 expense.getLocation(),
                 expense.getDate(),
@@ -302,22 +264,5 @@ public class ExpenseService {
         return t.isEmpty() ? null : t;
     }
 
-    /**
-     * Rule: loan repayments paid by non in-hand modes (bank transfer / cheque) should not affect
-     * daily in-hand budget. All other expenses keep existing behavior.
-     */
-    private static boolean shouldAffectDailyInHandBudget(Expense e) {
-        if (e == null) return false;
-        if (!isLoanRepayment(e)) return true;
-        String pm = e.getPaymentMethod() == null ? "" : e.getPaymentMethod().trim().toLowerCase();
-        return "cash".equals(pm) || "upi".equals(pm);
-    }
-
-    private static boolean isLoanRepayment(Expense e) {
-        if (e == null) return false;
-        if (e.getExpenseCategory() == ExpenseCategory.LOAN) return true;
-        String c = e.getCategory() == null ? "" : e.getCategory().trim().toLowerCase();
-        return "loan_repayment".equals(c) || "loan_repay".equals(c) || "loan".equals(c) || "market_loan".equals(c);
-    }
 }
 

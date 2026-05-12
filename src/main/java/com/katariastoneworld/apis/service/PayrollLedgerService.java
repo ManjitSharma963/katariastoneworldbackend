@@ -44,9 +44,6 @@ public class PayrollLedgerService {
     private ExpenseRepository expenseRepository;
 
     @Autowired
-    private DailyBudgetService dailyBudgetService;
-
-    @Autowired
     private FinancialLedgerService financialLedgerService;
 
     public EmployeePayrollLedgerEntry recordAdvance(Long employeeId, PayrollAdvanceRequestDTO req, String location, Long actorUserId) {
@@ -87,9 +84,6 @@ public class PayrollLedgerService {
         ex.setReferenceId(String.valueOf(saved.getId()));
         expenseRepository.save(ex);
 
-        if (LocalDate.now().equals(d)) {
-            dailyBudgetService.adjustRemainingForDailyExpense(location, amt.negate());
-        }
         financialLedgerService.recordTransaction(
                 location,
                 d,
@@ -178,9 +172,6 @@ public class PayrollLedgerService {
             ex.setReferenceId(String.valueOf(pay.getId()));
             expenseRepository.save(ex);
 
-            if (LocalDate.now().equals(d)) {
-                dailyBudgetService.adjustRemainingForDailyExpense(location, desiredCashPaid.negate());
-            }
             financialLedgerService.recordTransaction(
                     location,
                     d,

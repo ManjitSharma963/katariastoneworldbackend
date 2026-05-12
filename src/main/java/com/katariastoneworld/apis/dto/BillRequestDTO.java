@@ -113,5 +113,13 @@ public class BillRequestDTO {
     /** Optional reason for supplementary bill creation. */
     @Size(max = 500, message = "Supplementary reason must be at most 500 characters")
     private String supplementaryReason;
+
+    /**
+     * Optional operator note. On create, stored on the bill header. On full replace (PUT), if non-blank,
+     * a dated block is appended to existing bill notes. Clients may send {@code description} instead of {@code notes}.
+     */
+    @Size(max = 2000, message = "Notes must be at most 2000 characters")
+    @JsonAlias({ "description" })
+    private String notes;
 }
 

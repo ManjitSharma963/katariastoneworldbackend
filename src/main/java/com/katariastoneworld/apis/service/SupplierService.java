@@ -4,6 +4,7 @@ import com.katariastoneworld.apis.dto.SupplierRequestDTO;
 import com.katariastoneworld.apis.dto.SupplierResponseDTO;
 import com.katariastoneworld.apis.entity.Supplier;
 import com.katariastoneworld.apis.repository.SupplierRepository;
+import com.katariastoneworld.apis.util.PhoneNumbers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,7 +23,7 @@ public class SupplierService {
         final String loc = location == null ? "" : location.trim();
         Supplier s = new Supplier();
         s.setName(dto.getName().trim());
-        s.setContactNumber(trimToNull(dto.getContactNumber()));
+        s.setContactNumber(PhoneNumbers.requireExactlyTenDigits(dto.getContactNumber(), "Contact number"));
         s.setAddress(trimToNull(dto.getAddress()));
         s.setLocation(loc);
         Supplier saved = supplierRepository.save(s);
@@ -64,4 +65,5 @@ public class SupplierService {
         String t = s.trim();
         return t.isEmpty() ? null : t;
     }
+
 }

@@ -30,4 +30,5 @@ public class BillCancellationLogDTO {
     private String paymentStatus;
     private LocalDateTime cancelledAt;
     private Long cancelledByUserId;
+    private String cancellationReason;
 }

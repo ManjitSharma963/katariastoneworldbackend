@@ -4,6 +4,8 @@ import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.CustomerAdvanceCreateRequestDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceHistoryEntryDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceResponseDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundRequestDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundResponseDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceSummaryDTO;
 import com.katariastoneworld.apis.service.CustomerAdvanceService;
 import com.katariastoneworld.apis.util.RequestUtil;
@@ -37,6 +39,16 @@ public class CustomerAdvanceController {
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
         CustomerAdvanceResponseDTO dto = customerAdvanceService.createAdvance(body, location);
+        return new ResponseEntity<>(dto, HttpStatus.CREATED);
+    }
+
+    @PostMapping("/refund")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<CustomerAdvanceRefundResponseDTO> refundAdvance(
+            @Valid @RequestBody CustomerAdvanceRefundRequestDTO body,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        CustomerAdvanceRefundResponseDTO dto = customerAdvanceService.refundAdvance(body, location);
         return new ResponseEntity<>(dto, HttpStatus.CREATED);
     }
 

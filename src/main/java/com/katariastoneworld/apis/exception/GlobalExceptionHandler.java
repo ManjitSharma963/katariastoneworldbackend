@@ -1,6 +1,7 @@
 package com.katariastoneworld.apis.exception;
 
 import com.katariastoneworld.apis.dto.ApiResponseDTO;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -75,6 +76,18 @@ public class GlobalExceptionHandler {
         String msg = root.getMessage() != null ? root.getMessage() : "Database constraint violation";
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponseDTO.error(msg, null, "DATA_INTEGRITY_ERROR"));
+    }
+
+    @ExceptionHandler(TransactionSystemException.class)
+    public ResponseEntity<ApiResponseDTO<Object>> handleTransactionSystem(TransactionSystemException ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        String rootMsg = root.getMessage() != null ? root.getMessage() : "Transaction commit failed";
+        String msg = "Could not commit JPA transaction: " + rootMsg;
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponseDTO.error(msg, null, "TXN_COMMIT_ERROR"));
     }
 
     @ExceptionHandler(RuntimeException.class)

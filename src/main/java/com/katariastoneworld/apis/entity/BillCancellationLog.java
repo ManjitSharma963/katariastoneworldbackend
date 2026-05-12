@@ -75,6 +75,10 @@ public class BillCancellationLog {
     @Column(name = "cancelled_by_user_id")
     private Long cancelledByUserId;
 
+    /** Operator-supplied reason for cancellation, when provided. */
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
+    private String cancellationReason;
+
     @PrePersist
     protected void onCreate() {
         if (cancelledAt == null) {

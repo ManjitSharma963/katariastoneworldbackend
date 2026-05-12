@@ -88,7 +88,7 @@ class BillLifecycleIntegrationTest {
         ProductResponseDTO afterPartialReturn = productService.getProductById(createdProduct.getId(), location);
         assertThat(afterPartialReturn.getQuantity()).isEqualTo(94.0);
 
-        billService.deleteBill(createdBill.getId(), "nongst", location, actor);
+        billService.deleteBill(createdBill.getId(), "nongst", location, actor, null);
 
         ProductResponseDTO afterDelete = productService.getProductById(createdProduct.getId(), location);
         assertThat(afterDelete.getQuantity()).isEqualTo(100.0);
