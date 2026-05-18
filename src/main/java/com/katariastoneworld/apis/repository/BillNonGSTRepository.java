@@ -23,8 +23,48 @@ public interface BillNonGSTRepository extends JpaRepository<BillNonGST, Long> {
     @Query("SELECT b FROM BillNonGST b WHERE (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))")
     List<BillNonGST> findByBillLocation(@Param("location") String location);
 
+    @Query("""
+            SELECT DISTINCT b FROM BillNonGST b
+            JOIN FETCH b.customer c
+            WHERE (b.location = :location OR (b.location IS NULL AND c.location = :location))
+            """)
+    List<BillNonGST> findByBillLocationWithCustomer(@Param("location") String location);
+
     @Query("SELECT b FROM BillNonGST b WHERE (b.location = :location OR (b.location IS NULL AND b.customer.location = :location)) AND b.createdByUserId = :userId")
     List<BillNonGST> findByBillLocationAndCreatedByUserId(@Param("location") String location, @Param("userId") Long userId);
+
+    @Query("""
+            SELECT DISTINCT b FROM BillNonGST b
+            JOIN FETCH b.customer c
+            WHERE (b.location = :location OR (b.location IS NULL AND c.location = :location))
+              AND b.createdByUserId = :userId
+            """)
+    List<BillNonGST> findByBillLocationWithCustomerAndCreatedBy(
+            @Param("location") String location, @Param("userId") Long userId);
+
+    @Query("""
+            SELECT DISTINCT b FROM BillNonGST b
+            JOIN FETCH b.customer c
+            WHERE (b.location = :location OR (b.location IS NULL AND c.location = :location))
+              AND b.billDate >= :from AND b.billDate <= :to
+            """)
+    List<BillNonGST> findByBillLocationWithCustomerAndBillDateBetween(
+            @Param("location") String location,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
+
+    @Query("""
+            SELECT DISTINCT b FROM BillNonGST b
+            JOIN FETCH b.customer c
+            WHERE (b.location = :location OR (b.location IS NULL AND c.location = :location))
+              AND b.createdByUserId = :userId
+              AND b.billDate >= :from AND b.billDate <= :to
+            """)
+    List<BillNonGST> findByBillLocationWithCustomerAndCreatedByAndBillDateBetween(
+            @Param("location") String location,
+            @Param("userId") Long userId,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to);
 
     @Query("SELECT b FROM BillNonGST b WHERE b.billNumber = :billNumber AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))")
     Optional<BillNonGST> findByBillNumberAndBillLocation(@Param("billNumber") String billNumber, @Param("location") String location);
@@ -74,5 +114,18 @@ public interface BillNonGSTRepository extends JpaRepository<BillNonGST, Long> {
     /** Max bill number for bills created by this user (per-user sequence, no conflict between users). */
     @Query(value = "SELECT MAX(CAST(b.bill_number AS UNSIGNED)) FROM bills_non_gst b WHERE b.bill_number REGEXP '^[0-9]+$' AND b.created_by_user_id = :userId", nativeQuery = true)
     Integer findMaxBillNumberByCreatedByUserId(@Param("userId") Long userId);
+
+    @Query("""
+            SELECT b FROM BillNonGST b
+            WHERE b.supplementaryBill = true
+              AND b.parentBillId = :parentId
+              AND b.parentBillType = :parentType
+              AND (b.location = :location OR (b.location IS NULL AND b.customer.location = :location))
+            ORDER BY b.createdAt ASC
+            """)
+    List<BillNonGST> findSupplementaryByParent(
+            @Param("parentId") Long parentId,
+            @Param("parentType") String parentType,
+            @Param("location") String location);
 }
 

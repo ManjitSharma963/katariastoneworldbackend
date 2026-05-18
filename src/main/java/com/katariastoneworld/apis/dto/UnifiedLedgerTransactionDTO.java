@@ -17,6 +17,8 @@ public class UnifiedLedgerTransactionDTO {
     private String txnType;
     private BigDecimal amount;
     private String paymentMode;
+    /** Ledger sub-type (e.g. {@code ADVANCE_APPLICATION} for wallet applied to a bill — not cash inflow). */
+    private String subCategory;
     private String source;
     private Long referenceId;
     private String description;

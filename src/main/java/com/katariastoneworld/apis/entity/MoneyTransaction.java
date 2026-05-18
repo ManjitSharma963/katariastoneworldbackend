@@ -35,7 +35,7 @@ public class MoneyTransaction {
     @Column(nullable = false, length = 8)
     private MoneyDirection direction;
 
-    @Enumerated(EnumType.STRING)
+    @Convert(converter = MoneyCategoryConverter.class)
     @Column(nullable = false, length = 32)
     private MoneyCategory category;
 
@@ -61,6 +61,13 @@ public class MoneyTransaction {
     @Column(name = "reference_id")
     private Long referenceId;
 
+    /**
+     * Originating {@code bill_payments.id} when this row was created from a bill payment
+     * (or its reversal line). {@link #referenceId} remains the bill id for reporting.
+     */
+    @Column(name = "bill_payment_id")
+    private Long billPaymentId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "reference_type", nullable = false, length = 16)
     private MoneyReferenceType referenceType = MoneyReferenceType.other;
@@ -76,6 +83,10 @@ public class MoneyTransaction {
 
     @Column(name = "linked_group_id", length = 64)
     private String linkedGroupId;
+
+    /** Groups all money rows for one exchange / adjustment flow (e.g. ADJ-20260516-1001). */
+    @Column(name = "adjustment_group_id", length = 64)
+    private String adjustmentGroupId;
 
     @Column(name = "metadata_json", columnDefinition = "JSON")
     private String metadataJson;

@@ -15,6 +15,8 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.katariastoneworld.apis.constants.BillLifecycleStatus;
+
 @Entity
 @Table(name = "bills_non_gst")
 @Where(clause = "is_deleted = false")
@@ -119,8 +121,12 @@ public class BillNonGST {
     @Column(name = "is_latest_version", nullable = false)
     private Boolean latestVersion = true;
 
-    @Column(name = "bill_status", nullable = false, length = 50)
-    private String billStatus = "ACTIVE";
+    /**
+     * Enterprise lifecycle for this bill (not payment state — see {@link #paymentStatus}).
+     * Values: {@link com.katariastoneworld.apis.constants.BillLifecycleStatus}.
+     */
+    @Column(name = "bill_status", nullable = false, length = 30)
+    private String billStatus = BillLifecycleStatus.COMPLETED;
 
     @Column(name = "parent_bill_id")
     private Long parentBillId;
@@ -130,6 +136,21 @@ public class BillNonGST {
 
     @Column(name = "supplementary_reason", length = 500)
     private String supplementaryReason;
+
+    @Column(name = "adjustment_reason", length = 500)
+    private String adjustmentReason;
+
+    @Column(name = "adjustment_type", length = 32)
+    private String adjustmentType;
+
+    @Column(name = "cancelled_at")
+    private LocalDateTime cancelledAt;
+
+    @Column(name = "cancelled_by_user_id")
+    private Long cancelledByUserId;
+
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
+    private String cancellationReason;
     
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemNonGST> items = new ArrayList<>();
@@ -183,6 +204,11 @@ public class BillNonGST {
         PENDING,
         PARTIAL,
         PAID,
+        /**
+         * Advance plus recorded cash/UPI exceeds bill total after an edit or adjustment; refund or wallet
+         * settlement still pending ({@code excessPaymentHandling=NONE} or manual follow-up).
+         */
+        REFUND_PENDING,
         CANCELLED
     }
 }

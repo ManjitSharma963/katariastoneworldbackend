@@ -1,7 +1,9 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.constants.MoneyLedgerCategories;
 import com.katariastoneworld.apis.dto.BalanceSummaryDTO;
 import com.katariastoneworld.apis.dto.UnifiedLedgerTransactionDTO;
+import com.katariastoneworld.apis.entity.MoneyCategory;
 import com.katariastoneworld.apis.entity.MoneyDirection;
 import com.katariastoneworld.apis.entity.MoneyPaymentMode;
 import com.katariastoneworld.apis.entity.MoneyTransaction;
@@ -29,9 +31,23 @@ public class BalanceSummaryService {
 
     private static final List<MoneyPaymentMode> IN_HAND_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
     private static final List<MoneyPaymentMode> BANK_MODES = List.of(MoneyPaymentMode.BANK);
+    private static final List<MoneyCategory> NON_EXPENSE_OUT_CATEGORIES = MoneyLedgerCategories.NON_EXPENSE_OUT;
 
     @Autowired
     private MoneyTransactionRepository moneyTransactionRepository;
+
+    /**
+     * Net CASH+UPI cashbox position immediately before {@code date}: ledger only
+     * ({@code SUM(IN) − SUM(OUT)} for {@code transactionDate < date}, excludes advance-application rows).
+     */
+    public BigDecimal openingCashUpiAtStartOfDay(String location, LocalDate date) {
+        if (location == null || location.isBlank() || date == null) {
+            return ZERO;
+        }
+        String loc = location.trim();
+        return scale2(
+                moneyTransactionRepository.sumNetSignedByLocationAndPaymentModesBeforeDate(loc, IN_HAND_MODES, date));
+    }
 
     public BalanceSummaryDTO getSummary(String location) {
         if (location == null || location.isBlank()) {
@@ -41,10 +57,10 @@ public class BalanceSummaryService {
         BigDecimal inHand = scale2(moneyTransactionRepository.sumNetSignedByLocationAndPaymentModes(loc, IN_HAND_MODES));
         BigDecimal bank = scale2(moneyTransactionRepository.sumNetSignedByLocationAndPaymentModes(loc, BANK_MODES));
         LocalDate today = LocalDate.now();
-        BigDecimal todayDebitCashUpi = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
-                loc, today, today, MoneyDirection.OUT, IN_HAND_MODES));
-        BigDecimal todayDebitBank = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
-                loc, today, today, MoneyDirection.OUT, BANK_MODES));
+        BigDecimal todayDebitCashUpi = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModesExcludingCategories(
+                loc, today, today, MoneyDirection.OUT, IN_HAND_MODES, NON_EXPENSE_OUT_CATEGORIES));
+        BigDecimal todayDebitBank = scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModesExcludingCategories(
+                loc, today, today, MoneyDirection.OUT, BANK_MODES, NON_EXPENSE_OUT_CATEGORIES));
         BalanceSummaryDTO dto = new BalanceSummaryDTO();
         dto.setInHand(inHand);
         dto.setBank(bank);
@@ -71,8 +87,8 @@ public class BalanceSummaryService {
         }
         LocalDate f = from != null ? from : LocalDate.now();
         LocalDate t = to != null ? to : f;
-        return scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModes(
-                location.trim(), f, t, MoneyDirection.OUT, IN_HAND_MODES));
+        return scale2(moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModesExcludingCategories(
+                location.trim(), f, t, MoneyDirection.OUT, IN_HAND_MODES, NON_EXPENSE_OUT_CATEGORIES));
     }
 
     public List<UnifiedLedgerTransactionDTO> listTransactions(String location, LocalDate from, LocalDate to, int limit) {
@@ -104,6 +120,7 @@ public class BalanceSummaryService {
         d.setTxnType(e.getDirection() != null ? e.getDirection().name() : null);
         d.setAmount(e.getAmount());
         d.setPaymentMode(e.getPaymentMode() != null ? e.getPaymentMode().name() : null);
+        d.setSubCategory(e.getSubCategory());
         d.setSource(e.getCategory() != null ? e.getCategory().name() : null);
         d.setReferenceId(e.getReferenceId());
         d.setDescription(e.getNotes());

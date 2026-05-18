@@ -69,6 +69,12 @@ public interface CustomerWalletTransactionRepository extends JpaRepository<Custo
             CustomerWalletTransaction.TxnType txnType,
             CustomerWalletTransaction.Status status);
 
+    boolean existsByReversalOfIdAndStatusAndTxnTypeAndSource(
+            Long reversalOfId,
+            CustomerWalletTransaction.Status status,
+            CustomerWalletTransaction.TxnType txnType,
+            String source);
+
     List<CustomerWalletTransaction> findByCustomer_IdOrderByCreatedAtDesc(Long customerId);
 
     List<CustomerWalletTransaction> findByCustomer_IdAndStatusOrderByCreatedAtAscIdAsc(
@@ -84,6 +90,11 @@ public interface CustomerWalletTransactionRepository extends JpaRepository<Custo
     List<CustomerWalletTransaction> findByCustomer_IdInAndStatusOrderByCreatedAtAscIdAsc(
             List<Long> customerIds,
             CustomerWalletTransaction.Status status);
+
+    boolean existsByCustomer_IdAndLinkedGroupIdAndSource(
+            Long customerId,
+            String linkedGroupId,
+            String source);
 
     @Query("""
             SELECT COALESCE(SUM(t.amount), 0)

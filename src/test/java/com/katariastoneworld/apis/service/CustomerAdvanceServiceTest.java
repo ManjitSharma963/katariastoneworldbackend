@@ -7,6 +7,9 @@ import com.katariastoneworld.apis.entity.BillKind;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.Customer;
 import com.katariastoneworld.apis.entity.CustomerWalletTransaction;
+import com.katariastoneworld.apis.repository.BillGSTRepository;
+import com.katariastoneworld.apis.repository.BillNonGSTRepository;
+import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceRepository;
 import com.katariastoneworld.apis.repository.CustomerAdvanceUsageRepository;
 import com.katariastoneworld.apis.repository.CustomerRepository;
@@ -20,6 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,6 +48,12 @@ class CustomerAdvanceServiceTest {
     private CustomerWalletTransactionRepository customerWalletTransactionRepository;
     @Mock
     private FinancialLedgerService financialLedgerService;
+    @Mock
+    private BillGSTRepository billGSTRepository;
+    @Mock
+    private BillNonGSTRepository billNonGSTRepository;
+    @Mock
+    private BillPaymentRepository billPaymentRepository;
 
     private CustomerAdvanceService service;
 
@@ -55,6 +65,19 @@ class CustomerAdvanceServiceTest {
         ReflectionTestUtils.setField(service, "customerRepository", customerRepository);
         ReflectionTestUtils.setField(service, "customerWalletTransactionRepository", customerWalletTransactionRepository);
         ReflectionTestUtils.setField(service, "financialLedgerService", financialLedgerService);
+        ReflectionTestUtils.setField(service, "billGSTRepository", billGSTRepository);
+        ReflectionTestUtils.setField(service, "billNonGSTRepository", billNonGSTRepository);
+        ReflectionTestUtils.setField(service, "billPaymentRepository", billPaymentRepository);
+    }
+
+    private static CustomerWalletTransaction activeCreditDeposit(BigDecimal amount) {
+        CustomerWalletTransaction t = new CustomerWalletTransaction();
+        t.setTxnType(CustomerWalletTransaction.TxnType.CREDIT);
+        t.setAmount(amount);
+        t.setSource("ADVANCE_DEPOSIT");
+        t.setPaymentMode(BillPaymentMode.CASH);
+        t.setStatus(CustomerWalletTransaction.Status.ACTIVE);
+        return t;
     }
 
     @Test
@@ -114,6 +137,9 @@ class CustomerAdvanceServiceTest {
                 CustomerWalletTransaction.Status.ACTIVE,
                 CustomerWalletTransaction.TxnType.CREDIT))
                 .thenReturn(new BigDecimal("40.00"));
+        when(customerWalletTransactionRepository.findByCustomer_IdAndStatusOrderByCreatedAtAscIdAsc(
+                7L, CustomerWalletTransaction.Status.ACTIVE))
+                .thenReturn(List.of(activeCreditDeposit(new BigDecimal("100.00"))));
         Customer cust = new Customer();
         cust.setId(7L);
         when(customerRepository.findById(7L)).thenReturn(java.util.Optional.of(cust));
@@ -135,6 +161,9 @@ class CustomerAdvanceServiceTest {
                 CustomerWalletTransaction.Status.ACTIVE,
                 CustomerWalletTransaction.TxnType.CREDIT))
                 .thenReturn(new BigDecimal("500.00"));
+        when(customerWalletTransactionRepository.findByCustomer_IdAndStatusOrderByCreatedAtAscIdAsc(
+                2L, CustomerWalletTransaction.Status.ACTIVE))
+                .thenReturn(List.of(activeCreditDeposit(new BigDecimal("500.00"))));
         Customer cust = new Customer();
         cust.setId(2L);
         when(customerRepository.findById(2L)).thenReturn(java.util.Optional.of(cust));
@@ -150,20 +179,24 @@ class CustomerAdvanceServiceTest {
 
     @Test
     void reverseAdvanceUsageForBill_insertsRefundCredit_whenDebitsExist() {
-        when(customerWalletTransactionRepository.sumDebitByBillReference(
-                "GST:5",
-                CustomerWalletTransaction.Status.ACTIVE,
-                CustomerWalletTransaction.TxnType.DEBIT)).thenReturn(new BigDecimal("80.00"));
         Customer c = new Customer();
         c.setId(3L);
         CustomerWalletTransaction debit = new CustomerWalletTransaction();
+        debit.setId(900L);
         debit.setCustomer(c);
+        debit.setAmount(new BigDecimal("80.00"));
         when(customerWalletTransactionRepository.findBySourceAndReferenceIdAndTxnTypeAndStatus(
                 eq("BILL_PAYMENT"),
                 eq("GST:5"),
                 eq(CustomerWalletTransaction.TxnType.DEBIT),
                 eq(CustomerWalletTransaction.Status.ACTIVE)))
                 .thenReturn(List.of(debit));
+        when(customerWalletTransactionRepository.existsByReversalOfIdAndStatusAndTxnTypeAndSource(
+                eq(900L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.CREDIT),
+                eq("REFUND")))
+                .thenReturn(false);
 
         service.reverseAdvanceUsageForBill(BillKind.GST, 5L);
 
@@ -174,15 +207,17 @@ class CustomerAdvanceServiceTest {
         assertThat(refund.getAmount()).isEqualByComparingTo("80.00");
         assertThat(refund.getSource()).isEqualTo("REFUND");
         assertThat(refund.getReferenceId()).isEqualTo("GST:5");
-        assertThat(refund.getNotes()).isEqualTo("Bill cancelled");
+        assertThat(refund.getNotes()).isEqualTo("Bill cancelled/replaced reversal");
     }
 
     @Test
     void reverseAdvanceUsageForBill_noOpWhenNothingUsed() {
-        when(customerWalletTransactionRepository.sumDebitByBillReference(
-                "NON_GST:8",
-                CustomerWalletTransaction.Status.ACTIVE,
-                CustomerWalletTransaction.TxnType.DEBIT)).thenReturn(BigDecimal.ZERO);
+        when(customerWalletTransactionRepository.findBySourceAndReferenceIdAndTxnTypeAndStatus(
+                eq("BILL_PAYMENT"),
+                eq("NON_GST:8"),
+                eq(CustomerWalletTransaction.TxnType.DEBIT),
+                eq(CustomerWalletTransaction.Status.ACTIVE)))
+                .thenReturn(Collections.emptyList());
 
         service.reverseAdvanceUsageForBill(BillKind.NON_GST, 8L);
 
@@ -200,17 +235,35 @@ class CustomerAdvanceServiceTest {
 
     @Test
     void getSummary_computesRemainingFromCreditMinusDebit() {
-        when(customerRepository.findByIdAndLocation(4L, "X")).thenReturn(java.util.Optional.of(new Customer()));
-        when(customerWalletTransactionRepository.sumByTxnType(
-                4L,
-                CustomerWalletTransaction.TxnType.CREDIT,
-                CustomerWalletTransaction.Status.ACTIVE))
+        Customer cust = new Customer();
+        cust.setId(4L);
+        when(customerRepository.findByIdAndLocation(4L, "X")).thenReturn(Optional.of(cust));
+        when(billGSTRepository.findByCustomer(cust)).thenReturn(Collections.emptyList());
+        when(billNonGSTRepository.findByCustomer(cust)).thenReturn(Collections.emptyList());
+
+        when(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                eq(4L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.CREDIT),
+                eq("ADVANCE_DEPOSIT")))
                 .thenReturn(new BigDecimal("200.00"));
-        when(customerWalletTransactionRepository.sumByTxnType(
-                4L,
-                CustomerWalletTransaction.TxnType.DEBIT,
-                CustomerWalletTransaction.Status.ACTIVE))
+        when(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                eq(4L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.DEBIT),
+                eq("BILL_PAYMENT")))
                 .thenReturn(new BigDecimal("45.50"));
+        when(customerWalletTransactionRepository.sumByCustomerIdAndStatusAndTxnTypeAndSource(
+                eq(4L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.CREDIT),
+                eq("REFUND")))
+                .thenReturn(BigDecimal.ZERO);
+        when(customerWalletTransactionRepository.getActiveWalletBalance(
+                eq(4L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.CREDIT)))
+                .thenReturn(new BigDecimal("154.50"));
 
         var summary = service.getSummary(4L, "X");
         assertThat(summary.getTotalAdvance()).isEqualTo(200.0);

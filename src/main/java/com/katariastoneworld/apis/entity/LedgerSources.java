@@ -14,6 +14,10 @@ public final class LedgerSources {
     public static final String ADVANCE = "ADVANCE";
     /** Customer advance refunded to customer (financial ledger ADVANCE_REFUND). */
     public static final String ADVANCE_REFUND = "ADVANCE_REFUND";
+    /** Non-GST bill replace: excess paid over new total → customer wallet store credit (see {@code BILL_EDIT_ADJUSTMENT}). */
+    public static final String BILL_EDIT_ADJUSTMENT = "BILL_EDIT_ADJUSTMENT";
+    /** Inventory bill return credited to wallet (paired with wallet txn id as reference key). */
+    public static final String BILL_RETURN_WALLET_CREDIT = "BILL_RETURN_WALLET_CREDIT";
     /** Client module payment in (unified ledger; Phase 2 name). */
     public static final String CLIENT_PAYMENT = "CLIENT_PAYMENT";
     /** Client module payment out / purchase settlement (DEBIT). */

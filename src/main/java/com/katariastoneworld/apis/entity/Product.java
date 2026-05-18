@@ -48,6 +48,7 @@ public class Product {
     
     @NotNull(message = "Quantity/Stock is required")
     @PositiveOrZero(message = "Quantity must be positive or zero")
+    /** On-hand cache; DB column {@code total_sqft_stock}. Update only with a matching {@code inventory_transactions} row (see ProductService). */
     @Column(name = "total_sqft_stock", nullable = false, precision = 10, scale = 2)
     private BigDecimal quantity; // Generic: can be sqft, count, etc.
 

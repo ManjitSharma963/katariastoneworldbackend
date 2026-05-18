@@ -1,0 +1,2 @@
+-- Manual run if Flyway V4 has not been applied (NON-GST adjustment workflow)
+-- See: db/migration/V4__bill_adjustment_workflow.sql

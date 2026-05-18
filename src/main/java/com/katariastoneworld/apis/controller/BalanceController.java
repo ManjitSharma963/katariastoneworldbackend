@@ -27,7 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping(value = "/api/v1/balance", produces = "application/json")
 @RequiresRole("admin")
-@Tag(name = "Balance", description = "Phase 3: cash/bank net balances from unified_financial_ledger.")
+@Tag(name = "Balance", description = "Cash/bank net balances from the transactions ledger.")
 public class BalanceController {
 
     @Autowired
@@ -45,7 +45,7 @@ public class BalanceController {
         return ResponseEntity.ok(balanceSummaryService.getSummary(location));
     }
 
-    @Operation(summary = "Unified ledger transaction history", description = "Rows from unified_financial_ledger for the location, newest first.")
+    @Operation(summary = "Transaction history", description = "Rows from transactions for the location, newest first.")
     @ApiResponse(responseCode = "200", description = "Success")
     @GetMapping("/transactions")
     @SecurityRequirement(name = "bearerAuth")

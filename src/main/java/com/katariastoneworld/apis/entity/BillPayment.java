@@ -66,6 +66,12 @@ public class BillPayment {
     @Column(name = "is_deleted", nullable = false)
     private Boolean isDeleted = false;
 
+    @Column(name = "is_reversed", nullable = false)
+    private Boolean isReversed = false;
+
+    @Column(name = "reversed_at")
+    private LocalDateTime reversedAt;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {

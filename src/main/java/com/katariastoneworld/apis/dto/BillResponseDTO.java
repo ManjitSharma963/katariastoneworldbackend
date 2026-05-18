@@ -36,6 +36,7 @@ public class BillResponseDTO {
     private Double otherExpenses;
     private Double discountAmount;
     private Double totalAmount;
+    @Schema(description = "Settlement vs bill total from advance + bill_payments: DUE, PENDING, PARTIAL, PAID, REFUND_PENDING, CANCELLED.")
     private String paymentStatus;
     /** @deprecated Legacy summary string; source-of-truth is {@code payments}/{@code bill_payments}. */
     @Deprecated
@@ -79,4 +80,25 @@ public class BillResponseDTO {
     private Long parentBillId;
     private String parentBillType;
     private String supplementaryReason;
+
+    /**
+     * Non-GST bill lifecycle only (maps to {@code bills_non_gst.bill_status}).
+     * Not the same as {@link #paymentStatus}. Omitted or null for GST bills in responses.
+     */
+    @Schema(description = "NON-GST lifecycle: DRAFT, COMPLETED, PARTIALLY_RETURNED, FULLY_RETURNED, EXCHANGED, CANCELLED, SUPERSEDED. Distinct from paymentStatus.")
+    private String billLifecycleStatus;
+
+    /**
+     * Aggregate return impact on this bill for UI (invoice unchanged on disk). Null when not computed.
+     */
+    private BillReturnSummaryDTO returnSummary;
+
+    /** Cumulative stock return documents for this bill (NON-GST detail). */
+    private List<BillStockReturnHistoryDTO> returnHistory = new ArrayList<>();
+
+    /** Child supplementary bills linked to this parent (NON-GST detail). */
+    private List<BillSupplementarySummaryDTO> supplementaryBills = new ArrayList<>();
+
+    /** Recent lifecycle audit events (newest first). */
+    private List<BillEventResponseDTO> billEvents = new ArrayList<>();
 }

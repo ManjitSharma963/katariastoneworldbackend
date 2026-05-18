@@ -5,10 +5,12 @@ import com.katariastoneworld.apis.dto.DailyBudgetEventDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetRequestDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
+import com.katariastoneworld.apis.constants.MoneyLedgerCategories;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.LedgerPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
+import com.katariastoneworld.apis.entity.MoneyCategory;
 import com.katariastoneworld.apis.entity.MoneyDirection;
 import com.katariastoneworld.apis.entity.MoneyPaymentMode;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
@@ -29,8 +31,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Budget-facing APIs without {@code daily_budget} / {@code daily_budget_events} tables: figures derive from
- * {@code transactions} ({@link BalanceSummaryService}) and {@link ExpenseRepository}.
+ * Budget-facing APIs backed by {@code transactions} ({@link BalanceSummaryService}) and {@link ExpenseRepository}.
  */
 @Service
 @Transactional
@@ -42,6 +43,7 @@ public class DailyBudgetService {
 
     private static final List<MoneyPaymentMode> IN_HAND_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
     private static final List<MoneyPaymentMode> BANK_MODES = List.of(MoneyPaymentMode.BANK);
+    private static final List<MoneyCategory> NON_EXPENSE_OUT_CATEGORIES = List.of(MoneyCategory.BILL_REVERSAL);
 
     @Autowired
     private ExpenseRepository expenseRepository;
@@ -86,20 +88,14 @@ public class DailyBudgetService {
                 .setScale(2, RoundingMode.HALF_UP);
 
         dto.setSpentAmount(spentAmount);
-        LocalDate today = LocalDate.now(ZoneId.systemDefault());
-        if (d.equals(today)) {
-            BigDecimal inHand = balanceSummaryService.getSummary(loc).getInHand();
-            if (inHand == null) {
-                inHand = ZERO;
-            } else {
-                inHand = inHand.setScale(2, RoundingMode.HALF_UP);
-            }
-            dto.setRemainingAmount(inHand);
-            dto.setBudgetAmount(inHand.add(spentAmount).setScale(2, RoundingMode.HALF_UP));
-        } else {
-            dto.setRemainingAmount(ZERO);
-            dto.setBudgetAmount(spentAmount);
-        }
+        BigDecimal opening = openingInHandBeforeDate(loc, d);
+        BigDecimal cashUpiCredits = sumTxDirection(loc, d, d, LedgerTransactionType.CREDIT, IN_HAND_MODES);
+        BigDecimal cashUpiDebits = sumOperatingOut(loc, d, d, IN_HAND_MODES);
+        BigDecimal billRefunds = sumBillRefundsOut(loc, d, d, IN_HAND_MODES);
+        BigDecimal remaining = opening.add(cashUpiCredits).subtract(cashUpiDebits).subtract(billRefunds)
+                .setScale(2, RoundingMode.HALF_UP);
+        dto.setRemainingAmount(remaining);
+        dto.setBudgetAmount(remaining.add(spentAmount).setScale(2, RoundingMode.HALF_UP));
         return dto;
     }
 
@@ -180,15 +176,27 @@ public class DailyBudgetService {
         LocalDate remainingAsOf = t.isAfter(today) ? today : t;
         dto.setRemainingAsOfDate(remainingAsOf);
 
-        DailyBudgetStatusDTO statusForDay = getBudgetStatus(loc, remainingAsOf);
-        BigDecimal budgetAmt = statusForDay.getBudgetAmount() != null ? statusForDay.getBudgetAmount() : BigDecimal.ZERO;
-        BigDecimal spentTbl = statusForDay.getSpentAmount() != null ? statusForDay.getSpentAmount() : BigDecimal.ZERO;
-        dto.setBudgetAmount(budgetAmt.setScale(2, RoundingMode.HALF_UP));
-        dto.setSpentAmount(spentTbl.setScale(2, RoundingMode.HALF_UP));
-        dto.setOpeningBalanceForDay(null);
+        BigDecimal openingForDay = openingInHandBeforeDate(loc, remainingAsOf);
+        dto.setOpeningBalanceForDay(openingForDay);
 
-        BigDecimal remaining = statusForDay.getRemainingAmount() != null ? statusForDay.getRemainingAmount() : BigDecimal.ZERO;
-        dto.setRemainingAmount(remaining.setScale(2, RoundingMode.HALF_UP));
+        BigDecimal cashUpiCredits = sumTxDirection(loc, f, t, LedgerTransactionType.CREDIT, IN_HAND_MODES);
+        BigDecimal cashUpiDebits = sumOperatingOut(loc, f, t, IN_HAND_MODES);
+        BigDecimal salesReturnsInRange = sumBillRefundsOut(loc, f, t, IN_HAND_MODES);
+
+        DailyBudgetStatusDTO statusForDay = getBudgetStatus(loc, remainingAsOf);
+        BigDecimal spentTbl = statusForDay.getSpentAmount() != null ? statusForDay.getSpentAmount() : BigDecimal.ZERO;
+        dto.setSpentAmount(spentTbl.setScale(2, RoundingMode.HALF_UP));
+
+        BigDecimal remaining;
+        if (f.equals(t)) {
+            remaining = openingForDay.add(cashUpiCredits).subtract(cashUpiDebits).subtract(salesReturnsInRange)
+                    .setScale(2, RoundingMode.HALF_UP);
+        } else {
+            remaining = statusForDay.getRemainingAmount() != null ? statusForDay.getRemainingAmount() : BigDecimal.ZERO;
+            remaining = remaining.setScale(2, RoundingMode.HALF_UP);
+        }
+        dto.setRemainingAmount(remaining);
+        dto.setBudgetAmount(remaining.add(spentTbl).setScale(2, RoundingMode.HALF_UP));
 
         BigDecimal loanRecvBc = loanLedgerEntryRepository.sumBankChequeModeEntriesBetween(loc, f, t, LoanLedgerEntryType.RECEIPT);
         dto.setLoanReceiptsBankChequeInRange((loanRecvBc != null ? loanRecvBc : BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP));
@@ -198,8 +206,6 @@ public class DailyBudgetService {
 
         BigDecimal bankCredits = sumTxDirection(loc, f, t, LedgerTransactionType.CREDIT, BANK_MODES);
         BigDecimal bankDebits = sumTxDirection(loc, f, t, LedgerTransactionType.DEBIT, BANK_MODES);
-        BigDecimal cashUpiCredits = sumTxDirection(loc, f, t, LedgerTransactionType.CREDIT, IN_HAND_MODES);
-        BigDecimal cashUpiDebits = sumTxDirection(loc, f, t, LedgerTransactionType.DEBIT, IN_HAND_MODES);
 
         dto.setBankCreditsInRange(bankCredits.setScale(2, RoundingMode.HALF_UP));
         dto.setBankDebitsInRange(bankDebits.setScale(2, RoundingMode.HALF_UP));
@@ -218,12 +224,30 @@ public class DailyBudgetService {
         return v != null ? v : BigDecimal.ZERO;
     }
 
+    /** Operating cash OUT (excludes bill-cancel refunds — those are revenue reversal, not expense). */
+    private BigDecimal sumOperatingOut(String location, LocalDate from, LocalDate to, List<MoneyPaymentMode> modes) {
+        BigDecimal v = moneyTransactionRepository.sumAmountByLocationDateRangeDirectionModesExcludingCategories(
+                location, from, to, MoneyDirection.OUT, modes, NON_EXPENSE_OUT_CATEGORIES);
+        return v != null ? v : BigDecimal.ZERO;
+    }
+
+    private BigDecimal sumBillRefundsOut(String location, LocalDate from, LocalDate to, List<MoneyPaymentMode> modes) {
+        BigDecimal v = moneyTransactionRepository.sumOutByLocationDateRangeModesAndCategories(
+                location, from, to, modes, MoneyLedgerCategories.NON_EXPENSE_OUT);
+        return v != null ? v : BigDecimal.ZERO;
+    }
+
+    /** CASH+UPI at start of {@code date}, from {@code transactions} only ({@code transaction_date < date}). */
+    private BigDecimal openingInHandBeforeDate(String location, LocalDate date) {
+        return balanceSummaryService.openingCashUpiAtStartOfDay(location, date);
+    }
+
     public List<DailyBudgetEventDTO> getBudgetEvents(String location, LocalDate from, LocalDate to, int limit) {
         return Collections.emptyList();
     }
 
     public void adjustRemainingForDailyExpense(String location, BigDecimal delta) {
-        // daily_budget table removed; expenses write to transactions via FinancialLedgerService
+        // no-op: expenses are recorded in transactions via MoneyTransactionService
     }
 
     public void recordInHandCollectionFromBill(String location, BigDecimal inHandAmount) {
@@ -232,18 +256,18 @@ public class DailyBudgetService {
 
     public void recordLoanReceipt(String location, BigDecimal amount, String lenderName, String notes) {
         if (location != null && amount != null) {
-            log.debug("loan_receipt (no daily_budget row) location={} amount={}", location.trim(), amount);
+            log.debug("loan_receipt location={} amount={}", location.trim(), amount);
         }
     }
 
     public void recordReceivableRepayment(String location, BigDecimal amount, String borrowerName, String notes) {
         if (location != null && amount != null) {
-            log.debug("receivable_repayment (no daily_budget row) location={} amount={}", location.trim(), amount);
+            log.debug("receivable_repayment location={} amount={}", location.trim(), amount);
         }
     }
 
     public void adjustBudgetForInHandDelta(String location, BigDecimal delta) {
-        // legacy daily_budget adjustment — position is in transactions
+        // no-op: in-hand position is derived from transactions
     }
 
     public void recordCashCollectionFromBill(String location, BigDecimal cashAmount) {

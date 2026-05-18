@@ -203,6 +203,11 @@ public class BillGST {
         PENDING,
         PARTIAL,
         PAID,
+        /**
+         * Advance plus recorded cash/UPI exceeds bill total after an edit or adjustment; refund or wallet
+         * settlement still pending ({@code excessPaymentHandling=NONE} or manual follow-up).
+         */
+        REFUND_PENDING,
         CANCELLED
     }
 }

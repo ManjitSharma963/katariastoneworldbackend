@@ -10,7 +10,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * Append-only inventory ledger. {@code products.quantity} remains a cached on-hand value kept in sync.
+ * Append-only inventory ledger. Cached on-hand lives on {@link Product} ({@code total_sqft_stock}); every change to that
+ * cache from sales/returns must be paired with a row here (see {@link com.katariastoneworld.apis.service.ProductService}).
  */
 @Entity
 @Table(name = "inventory_transactions", indexes = {

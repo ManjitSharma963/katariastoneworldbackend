@@ -14,4 +14,6 @@ public class CustomerAdvanceSummaryDTO {
     private Double totalUsed;
     /** Active wallet balance (all credits minus all debits). */
     private Double remaining;
+    /** Unpaid amount still pending across the customer's active old bills. */
+    private Double oldBillPendingAmount;
 }

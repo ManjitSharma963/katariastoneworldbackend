@@ -164,7 +164,9 @@ public class MoneyTransactionService {
         String s = source.trim().toUpperCase(Locale.ROOT);
         return switch (s) {
             case "BILL" -> MoneyCategory.BILL;
-            case "ADVANCE", "ADVANCE_REFUND" -> MoneyCategory.ADVANCE;
+            case "BILL_REVERSAL", "BILL_PAYMENT_REVERSAL" -> MoneyCategory.BILL_REVERSAL;
+            case "BILL_RETURN" -> MoneyCategory.BILL_RETURN;
+            case "ADVANCE", "ADVANCE_REFUND", "BILL_EDIT_ADJUSTMENT" -> MoneyCategory.ADVANCE;
             case "EXPENSE" -> MoneyCategory.EXPENSE;
             case "SALARY_ADVANCE", "SALARY_PAY" -> MoneyCategory.SALARY;
             case "LOAN", "LOAN_REPAY", "LOAN_GIVEN_REPAY", "LOAN_GIVEN" -> MoneyCategory.LOAN;
@@ -187,6 +189,7 @@ public class MoneyTransactionService {
             case "SALARY_ADVANCE" -> "SALARY_ADVANCE";
             case "SALARY_PAY" -> "SALARY_PAY";
             case "ADVANCE_REFUND" -> "ADVANCE_REFUND";
+            case "BILL_EDIT_ADJUSTMENT" -> "BILL_EDIT_ADJUSTMENT";
             case "BUDGET_ADJUSTMENT" -> "BUDGET_ADJUSTMENT";
             default -> s;
         };
@@ -196,7 +199,7 @@ public class MoneyTransactionService {
         String s = source.trim().toUpperCase(Locale.ROOT);
         return switch (s) {
             case "BILL", "ADVANCE" -> MoneyReferenceType.bill;
-            case "ADVANCE_REFUND" -> MoneyReferenceType.other;
+            case "ADVANCE_REFUND", "BILL_EDIT_ADJUSTMENT" -> MoneyReferenceType.other;
             case "EXPENSE" -> MoneyReferenceType.expense;
             case "SALARY_ADVANCE", "SALARY_PAY" -> MoneyReferenceType.salary;
             case "LOAN", "LOAN_REPAY", "LOAN_GIVEN", "LOAN_GIVEN_REPAY" -> MoneyReferenceType.loan;
@@ -224,7 +227,7 @@ public class MoneyTransactionService {
                 .ifPresent(moneyTransactionRepository::delete);
     }
 
-    /** Legacy {@code financial_ledger} EXPENSE_DEBIT rows keyed by expense id. */
+    /** Removes the transactions row for an expense (reference_type=expense). */
     public void removeLegacyExpenseDebitLine(Long expenseId) {
         if (expenseId == null) {
             return;

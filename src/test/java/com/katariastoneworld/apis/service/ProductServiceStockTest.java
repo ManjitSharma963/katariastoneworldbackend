@@ -15,11 +15,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -110,7 +112,12 @@ class ProductServiceStockTest {
                 eq(100L),
                 eq("GST"),
                 eq("Test note"),
-                eq(9L));
+                eq(9L),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull());
     }
 
     @Test
@@ -154,6 +161,8 @@ class ProductServiceStockTest {
         locked.setLocationId(2L);
         when(productRepository.findByIdForUpdate(pid)).thenReturn(java.util.Optional.of(locked));
         when(productRepository.save(any(Product.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(inventoryTransactionService.findLatestBillSaleTransactionId(eq(pid), eq(44L), eq(BillKind.GST)))
+                .thenReturn(Optional.empty());
 
         productService.recordBillStockReturn(pid, new BigDecimal("2.25"), 44L, BillKind.GST, "Partial", "Loc1");
 
@@ -166,7 +175,12 @@ class ProductServiceStockTest {
                 eq(44L),
                 eq("GST"),
                 eq("Partial"),
-                eq(2L));
+                eq(2L),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull());
         var cap = ArgumentCaptor.forClass(Product.class);
         verify(productRepository).save(cap.capture());
         assertThat(cap.getValue().getQuantity()).isEqualByComparingTo("7.25");

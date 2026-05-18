@@ -20,7 +20,7 @@ public class DailyBudgetCalculatedSummaryDTO {
     private LocalDate from;
     private LocalDate to;
 
-    /** Remaining cash in hand as of {@link #remainingAsOfDate} (today from daily_budget; past from last event closing). */
+    /** Remaining cash in hand as of {@link #remainingAsOfDate} (from transactions net for CASH/UPI). */
     private BigDecimal remainingAmount;
 
     /**
@@ -28,17 +28,13 @@ public class DailyBudgetCalculatedSummaryDTO {
      */
     private LocalDate remainingAsOfDate;
 
-    /**
-     * Sum of {@code spent_amount} for EXPENSE_DEBIT and EXPENSE_CREDIT events with {@code date} in [from, to] inclusive.
-     */
+    /** Sum of CASH/UPI OUT transactions (expenses and similar) in [from, to] inclusive. */
     private BigDecimal expenseFromEventsInRange;
 
-    /**
-     * First {@code daily_budget_events} row that calendar day (by {@code created_at}): {@code opening_balance} — matches Reports "opening budget".
-     */
+    /** Opening balance for the day (null when not tracked separately). */
     private BigDecimal openingBalanceForDay;
 
-    /** Daily budget cap from daily_budget row (same field used when editing budget for that date). */
+    /** Implied daily cap: remaining + spent for {@link #remainingAsOfDate}. */
     private BigDecimal budgetAmount;
 
     /** Total of expense rows for remainingAsOfDate — aligns with Daily Closing report total expenses for one day. */
@@ -56,8 +52,8 @@ public class DailyBudgetCalculatedSummaryDTO {
     private BigDecimal loanRepaymentsBankChequeInRange;
 
     /**
-     * Credits to the “bank channel” budget in [from, to]: loan received (bank/card/cheque), client payments in,
-     * customer advance deposits — all recorded with bank transfer, cheque, or other non–cash/UPI modes in the financial ledger.
+     * Credits to the bank rail in [from, to]: loan received (bank/card/cheque), client payments in,
+     * customer advance deposits — BANK-mode transactions.
      */
     private BigDecimal bankCreditsInRange;
 
@@ -67,18 +63,17 @@ public class DailyBudgetCalculatedSummaryDTO {
     private BigDecimal bankDebitsInRange;
 
     /**
-     * Debits from cash/UPI: expenses paid cash/UPI plus bill payments recorded as cash or UPI in the financial ledger.
+     * Debits from cash/UPI: expenses and bill payments recorded as CASH or UPI in transactions.
      */
     private BigDecimal cashUpiDebitsInRange;
 
     /**
-     * Credits to cash/UPI: loan receipts (cash/UPI), client payment in and advance deposits in cash/UPI (financial ledger).
+     * Credits to cash/UPI: loan receipts, client payments in, advance deposits (CASH/UPI transactions).
      */
     private BigDecimal cashUpiCreditsInRange;
 
     /**
-     * Bank opening carried into the first day of the requested range when {@code from} equals {@code to} and that date is today.
-     * Same field as {@code daily_budget.bank_opening_balance} after calendar-day rollover.
+     * Bank opening carried into the first day of the requested range (null when not tracked).
      */
     private BigDecimal bankOpeningBalanceCarriedForward;
 

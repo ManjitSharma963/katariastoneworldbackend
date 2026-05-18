@@ -15,6 +15,11 @@ public interface BillPaymentRepository extends JpaRepository<BillPayment, Long> 
 
     List<BillPayment> findByBillKindAndBillIdOrderByIdAsc(BillKind billKind, Long billId);
 
+    /** True if an active reversal row already references this original payment id (idempotent deactivate). */
+    boolean existsByReversalOfIdAndIsDeletedFalse(Long reversalOfId);
+
+    java.util.Optional<BillPayment> findFirstByReversalOfIdAndIsDeletedFalseOrderByIdAsc(Long reversalOfId);
+
     java.util.Optional<BillPayment> findByIdAndBillKindAndBillId(Long id, BillKind billKind, Long billId);
 
     List<BillPayment> findByBillKindAndBillIdIn(BillKind billKind, Collection<Long> billIds);

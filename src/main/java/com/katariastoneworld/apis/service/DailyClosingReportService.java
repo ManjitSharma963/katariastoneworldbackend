@@ -19,10 +19,13 @@ import com.katariastoneworld.apis.entity.CustomerWalletTransaction;
 import com.katariastoneworld.apis.entity.ClientTransaction;
 import com.katariastoneworld.apis.entity.ClientTransactionType;
 import com.katariastoneworld.apis.entity.Customer;
-import com.katariastoneworld.apis.entity.DailyClosingSnapshot;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.MoneyDirection;
+import com.katariastoneworld.apis.entity.MoneyCategory;
 import com.katariastoneworld.apis.entity.MoneyPaymentMode;
+import com.katariastoneworld.apis.entity.MoneyTransaction;
+import com.katariastoneworld.apis.constants.BillLifecycleStatus;
+import com.katariastoneworld.apis.constants.MoneyLedgerCategories;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
@@ -32,7 +35,6 @@ import com.katariastoneworld.apis.repository.CustomerWalletTransactionRepository
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import com.katariastoneworld.apis.repository.ClientTransactionRepository;
 import com.katariastoneworld.apis.repository.MoneyTransactionRepository;
-import com.katariastoneworld.apis.repository.DailyClosingSnapshotRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -96,9 +98,13 @@ public class DailyClosingReportService {
     private ClientTransactionRepository clientTransactionRepository;
 
     @Autowired
-    private DailyClosingSnapshotRepository dailyClosingSnapshotRepository;
+    private BalanceSummaryService balanceSummaryService;
 
     private static final List<MoneyPaymentMode> IN_HAND_PAYMENT_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
+    private static final List<MoneyPaymentMode> ALL_MONEY_MODES = List.of(
+            MoneyPaymentMode.CASH, MoneyPaymentMode.UPI, MoneyPaymentMode.BANK);
+    /** Synthetic {@link DailyClosingExpenseLineDTO#getId()} base for client/supplier payment rows from {@code transactions}. */
+    private static final long CLIENT_PAYMENT_EXPENSE_LINE_ID_BASE = 8_000_000_000L;
 
     /**
      * Single calendar day (same as {@link #buildReportForPeriod} with {@code from == to}).
@@ -125,7 +131,9 @@ public class DailyClosingReportService {
         Map<String, BigDecimal> advanceUsedByBill = loadAdvanceUsedByBill(gstBills, nonBills);
 
         List<DailyClosingBillLineDTO> lines = new ArrayList<>();
-        BigDecimal totalSales = BigDecimal.ZERO;
+        BigDecimal grossSales = BigDecimal.ZERO;
+        BigDecimal supplementarySales = BigDecimal.ZERO;
+        BigDecimal cancelledSales = BigDecimal.ZERO;
         BigDecimal pendingOnBilledDay = BigDecimal.ZERO;
 
         for (BillGST b : gstBills) {
@@ -133,7 +141,15 @@ public class DailyClosingReportService {
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
             lines.add(toLineGst(b, pays, advanceUsed));
-            totalSales = totalSales.add(b.getTotalAmount());
+            BigDecimal billTotal = b.getTotalAmount() != null ? b.getTotalAmount() : ZERO;
+            if (Boolean.TRUE.equals(b.getSupplementaryBill())) {
+                supplementarySales = supplementarySales.add(billTotal);
+            } else {
+                grossSales = grossSales.add(billTotal);
+            }
+            if (isCancelledGstBill(b)) {
+                cancelledSales = cancelledSales.add(billTotal);
+            }
             pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
         }
@@ -142,10 +158,21 @@ public class DailyClosingReportService {
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.NON_GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
             lines.add(toLineNon(b, pays, advanceUsed));
-            totalSales = totalSales.add(b.getTotalAmount());
+            BigDecimal billTotal = b.getTotalAmount() != null ? b.getTotalAmount() : ZERO;
+            if (Boolean.TRUE.equals(b.getSupplementaryBill())) {
+                supplementarySales = supplementarySales.add(billTotal);
+            } else {
+                grossSales = grossSales.add(billTotal);
+            }
+            if (isCancelledNonGstBill(b)) {
+                cancelledSales = cancelledSales.add(billTotal);
+            }
             pendingOnBilledDay = pendingOnBilledDay.add(computeDue(b.getTotalAmount(), pays, advanceUsed, b.getPaymentMethod(),
                     b.getPaymentStatus().name()));
         }
+        grossSales = grossSales.setScale(2, RoundingMode.HALF_UP);
+        supplementarySales = supplementarySales.setScale(2, RoundingMode.HALF_UP);
+        cancelledSales = cancelledSales.setScale(2, RoundingMode.HALF_UP);
 
         lines.sort(Comparator
                 .comparing(DailyClosingBillLineDTO::getBillDate, Comparator.nullsLast(Comparator.naturalOrder()))
@@ -157,7 +184,8 @@ public class DailyClosingReportService {
                 .reduce(ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        List<DailyClosingExpenseLineDTO> expenseLineDtos = expenseRepository.findByLocationAndDateBetween(loc, from, to).stream()
+        List<Expense> expenseRows = expenseRepository.findByLocationAndDateBetween(loc, from, to);
+        List<DailyClosingExpenseLineDTO> expenseLineDtos = expenseRows.stream()
                 .sorted(Comparator.comparing(Expense::getDate, Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(Expense::getId, Comparator.nullsLast(Comparator.naturalOrder())))
                 .map(e -> DailyClosingExpenseLineDTO.builder()
@@ -169,15 +197,44 @@ public class DailyClosingReportService {
                         .paymentMethod(e.getPaymentMethod())
                         .description(e.getDescription())
                         .build())
-                .collect(Collectors.toList());
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        BigDecimal clientSupplierPayOut = moneyTransactionRepository
+                .sumOutByLocationDateRangeModesAndCategories(loc, from, to, ALL_MONEY_MODES,
+                        List.of(MoneyCategory.CLIENT_PAYMENT))
+                .setScale(2, RoundingMode.HALF_UP);
+        for (MoneyTransaction m : moneyTransactionRepository.findClientPaymentOutLinesForReport(loc, from, to)) {
+            expenseLineDtos.add(DailyClosingExpenseLineDTO.builder()
+                    .id(CLIENT_PAYMENT_EXPENSE_LINE_ID_BASE + m.getId())
+                    .expenseType("client_payment")
+                    .date(m.getTransactionDate())
+                    .category("client_supplier")
+                    .amount(m.getAmount() != null ? m.getAmount().doubleValue() : 0.0)
+                    .paymentMethod(m.getPaymentMode() != null
+                            ? m.getPaymentMode().name().toLowerCase(Locale.ROOT)
+                            : "cash")
+                    .description(m.getNotes())
+                    .build());
+        }
+        expenseLineDtos.sort(Comparator
+                .comparing(DailyClosingExpenseLineDTO::getDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparing(DailyClosingExpenseLineDTO::getId, Comparator.nullsLast(Comparator.naturalOrder())));
 
         List<BillPayment> collectedInPeriod = from.equals(to)
                 ? billPaymentRepository.findByPaymentDateAndBillLocation(loc, from)
                 : billPaymentRepository.findByPaymentDateBetweenAndBillLocation(loc, from, to);
         BigDecimal totalCollectedFromBills = collectedInPeriod.stream()
+                .filter(p -> !isRefundPaymentRow(p))
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(2, RoundingMode.HALF_UP);
+
+        BigDecimal salesReturns = moneyTransactionRepository
+                .sumOutByLocationDateRangeModesAndCategories(loc, from, to, IN_HAND_PAYMENT_MODES,
+                        MoneyLedgerCategories.NON_EXPENSE_OUT)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal netSales = grossSales.subtract(salesReturns).add(supplementarySales).max(ZERO)
                 .setScale(2, RoundingMode.HALF_UP);
 
         Map<String, Double> paymentSummary = new LinkedHashMap<>();
@@ -187,7 +244,7 @@ public class DailyClosingReportService {
         paymentSummary.put("CHEQUE", 0.0);
         paymentSummary.put("OTHER", 0.0);
         for (BillPayment p : collectedInPeriod) {
-            if (p.getAmount() == null) {
+            if (isRefundPaymentRow(p) || p.getAmount() == null) {
                 continue;
             }
             if (p.getPaymentMode() == null) {
@@ -199,17 +256,19 @@ public class DailyClosingReportService {
         }
 
         BigDecimal inHandCollectedFromBills = collectedInPeriod.stream()
+                .filter(p -> !isRefundPaymentRow(p))
                 .filter(p -> p.getPaymentMode() == BillPaymentMode.CASH || p.getPaymentMode() == BillPaymentMode.UPI)
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
 
-        BigDecimal expenses = expenseRepository.findByLocationAndDateBetween(loc, from, to).stream()
+        BigDecimal expenseTableTotal = expenseRows.stream()
                 .map(Expense::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal expenses = expenseTableTotal.add(clientSupplierPayOut).setScale(2, RoundingMode.HALF_UP);
 
         LocalDateTime periodStart = from.atStartOfDay();
         LocalDateTime periodEndExclusive = to.plusDays(1).atStartOfDay();
@@ -286,6 +345,27 @@ public class DailyClosingReportService {
 
         totalCollected = totalCollected.add(clientPaymentsIn).setScale(2, RoundingMode.HALF_UP);
         inHandCollected = inHandCollected.add(clientInHand).setScale(2, RoundingMode.HALF_UP);
+
+        Map<String, Double> loanReceiptsByMode = new LinkedHashMap<>();
+        loanReceiptsByMode.put("CASH", 0.0);
+        loanReceiptsByMode.put("UPI", 0.0);
+        loanReceiptsByMode.put("BANK_TRANSFER", 0.0);
+        loanReceiptsByMode.put("CHEQUE", 0.0);
+        loanReceiptsByMode.put("OTHER", 0.0);
+        BigDecimal loanCash = moneyTransactionRepository
+                .sumInByLocationDateRangeCategoryModes(loc, from, to, MoneyCategory.LOAN, List.of(MoneyPaymentMode.CASH))
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal loanUpi = moneyTransactionRepository
+                .sumInByLocationDateRangeCategoryModes(loc, from, to, MoneyCategory.LOAN, List.of(MoneyPaymentMode.UPI))
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal loanBank = moneyTransactionRepository
+                .sumInByLocationDateRangeCategoryModes(loc, from, to, MoneyCategory.LOAN, List.of(MoneyPaymentMode.BANK))
+                .setScale(2, RoundingMode.HALF_UP);
+        loanReceiptsByMode.put("CASH", loanCash.doubleValue());
+        loanReceiptsByMode.put("UPI", loanUpi.doubleValue());
+        loanReceiptsByMode.put("BANK_TRANSFER", loanBank.doubleValue());
+        BigDecimal totalLoanReceipts = loanCash.add(loanUpi).add(loanBank).setScale(2, RoundingMode.HALF_UP);
+
         BigDecimal cashInHand = inHandCollected.subtract(expenses).setScale(2, RoundingMode.HALF_UP);
         DailyCashFlowDTO cashFlow = buildCashFlowView(from, loc, totalCollectedFromBills, advanceDeposits, expenses);
 
@@ -314,11 +394,19 @@ public class DailyClosingReportService {
                 .dateTo(to)
                 .location(loc)
                 .totalBills(gstBills.size() + nonBills.size())
-                .totalSales(totalSales.setScale(2, RoundingMode.HALF_UP).doubleValue())
+                .totalSales(netSales.doubleValue())
+                .grossSales(grossSales.doubleValue())
+                .supplementarySales(supplementarySales.doubleValue())
+                .cancelledSales(cancelledSales.doubleValue())
+                .netSales(netSales.doubleValue())
+                .salesReturns(salesReturns.doubleValue())
+                .billRefundsCashUpi(salesReturns.doubleValue())
                 .totalPaidOnBills(totalPaidOnBills.doubleValue())
                 .totalDueOnBills(dueOnBills.doubleValue())
                 .totalCollected(totalCollected.doubleValue())
                 .paymentSummary(paymentSummary)
+                .loanReceiptsByMode(loanReceiptsByMode)
+                .totalLoanReceipts(totalLoanReceipts.doubleValue())
                 .warnings(warnings)
                 .collectionsReconciliationOk(reconOk)
                 .collectionsReconciliationDelta(reconDelta.doubleValue())
@@ -340,11 +428,7 @@ public class DailyClosingReportService {
             BigDecimal salesCollection,
             BigDecimal advanceReceived,
             BigDecimal expenses) {
-        BigDecimal opening = dailyClosingSnapshotRepository
-                .findFirstByLocationAndSnapshotDateBeforeOrderBySnapshotDateDesc(location, fromDate)
-                .map(DailyClosingSnapshot::getInHand)
-                .orElse(ZERO)
-                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal opening = balanceSummaryService.openingCashUpiAtStartOfDay(location, fromDate);
         BigDecimal sales = nvl(salesCollection);
         BigDecimal advance = nvl(advanceReceived);
         BigDecimal expense = nvl(expenses);
@@ -490,6 +574,7 @@ public class DailyClosingReportService {
             overpaidAmt = ZERO;
         }
         ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
+        String lineStatus = isCancelledGstBill(b) ? "CANCELLED" : deriveLineStatus(total, paid);
         return DailyClosingBillLineDTO.builder()
                 .billType("GST")
                 .billId(b.getId())
@@ -498,7 +583,7 @@ public class DailyClosingReportService {
                 .totalAmount(total.doubleValue())
                 .paidAmount(paid.doubleValue())
                 .dueAmount(due.doubleValue())
-                .status(deriveLineStatus(total, paid))
+                .status(lineStatus)
                 .paymentModes(formatModes(pays, pm))
                 .cashAmount(scale2(buckets.cash()))
                 .upiAmount(scale2(buckets.upi()))
@@ -519,6 +604,7 @@ public class DailyClosingReportService {
             overpaidAmt = ZERO;
         }
         ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
+        String lineStatus = isCancelledNonGstBill(b) ? "CANCELLED" : deriveLineStatus(total, paid);
         return DailyClosingBillLineDTO.builder()
                 .billType("NON_GST")
                 .billId(b.getId())
@@ -527,7 +613,7 @@ public class DailyClosingReportService {
                 .totalAmount(total.doubleValue())
                 .paidAmount(paid.doubleValue())
                 .dueAmount(due.doubleValue())
-                .status(deriveLineStatus(total, paid))
+                .status(lineStatus)
                 .paymentModes(formatModes(pays, pm))
                 .cashAmount(scale2(buckets.cash()))
                 .upiAmount(scale2(buckets.upi()))
@@ -865,7 +951,7 @@ public class DailyClosingReportService {
                 .budgetNetMovement(budgetNetMovement.doubleValue())
                 .delta(delta.doubleValue())
                 .level(ok ? "OK" : "WARNING")
-                .message("CASH/UPI net for the day from transactions; daily_budget table removed.")
+                .message("CASH/UPI net for the day from transactions.")
                 .possibleCauses(causes)
                 .build();
     }
@@ -931,7 +1017,9 @@ public class DailyClosingReportService {
     }
 
     private static boolean isMissingPaymentEntry(Enum<?> paymentStatus, String paymentMethod, List<BillPayment> paymentRows) {
-        boolean looksPaid = paymentStatus != null && ("PAID".equals(paymentStatus.name()) || "PARTIAL".equals(paymentStatus.name()));
+        boolean looksPaid = paymentStatus != null
+                && ("PAID".equals(paymentStatus.name()) || "PARTIAL".equals(paymentStatus.name())
+                        || "REFUND_PENDING".equals(paymentStatus.name()));
         boolean hasLegacyMethod = paymentMethod != null && !paymentMethod.isBlank() && !"-".equals(paymentMethod.trim());
         return looksPaid && hasLegacyMethod && (paymentRows == null || paymentRows.isEmpty());
     }
@@ -986,5 +1074,48 @@ public class DailyClosingReportService {
         } catch (IllegalArgumentException ex) {
             return null;
         }
+    }
+
+    private static boolean isCancelledGstBill(BillGST b) {
+        if (b == null) {
+            return false;
+        }
+        if (Boolean.TRUE.equals(b.getIsDeleted())) {
+            return true;
+        }
+        if (b.getPaymentStatus() == BillGST.PaymentStatus.CANCELLED) {
+            return true;
+        }
+        String st = b.getBillStatus();
+        return st != null && BillLifecycleStatus.CANCELLED.equalsIgnoreCase(st.trim());
+    }
+
+    private static boolean isCancelledNonGstBill(BillNonGST b) {
+        if (b == null) {
+            return false;
+        }
+        if (Boolean.TRUE.equals(b.getIsDeleted())) {
+            return true;
+        }
+        if (b.getPaymentStatus() == BillNonGST.PaymentStatus.CANCELLED) {
+            return true;
+        }
+        String st = b.getBillStatus();
+        return st != null && BillLifecycleStatus.CANCELLED.equalsIgnoreCase(st.trim());
+    }
+
+    /** Negative / reversal payment rows are refunds, not collections. */
+    private static boolean isRefundPaymentRow(BillPayment p) {
+        if (p == null) {
+            return true;
+        }
+        if (p.getAmount() != null && p.getAmount().compareTo(ZERO) < 0) {
+            return true;
+        }
+        if (p.getPaymentStatus() != null && "REVERSAL".equalsIgnoreCase(p.getPaymentStatus().trim())) {
+            return true;
+        }
+        String src = p.getSourceType();
+        return src != null && src.toUpperCase(Locale.ROOT).contains("REVERSAL");
     }
 }

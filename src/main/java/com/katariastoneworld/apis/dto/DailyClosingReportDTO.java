@@ -30,8 +30,30 @@ public class DailyClosingReportDTO {
     /** Bills with {@code bill_date = date} (GST + non-GST) for this location. */
     private Integer totalBills;
 
-    /** Sum of {@code total_amount} for those bills. */
+    /** Sum of {@code total_amount} for those bills (net of cancellations). */
     private Double totalSales;
+
+    /** Gross sales on bill date — parent/original invoices only (excludes supplementary children). */
+    private Double grossSales;
+
+    /** Supplementary / exchange child bills on bill date in this period. */
+    private Double supplementarySales;
+
+    /** Total of cancelled bills whose {@code bill_date} falls in this period. */
+    private Double cancelledSales;
+
+    /**
+     * {@link #grossSales} − {@link #salesReturns} + {@link #supplementarySales}.
+     */
+    private Double netSales;
+
+    /**
+     * Cash/UPI OUT for {@code BILL_REVERSAL} + {@code BILL_RETURN} in period — sales returns, not expenses.
+     */
+    private Double salesReturns;
+
+    /** @deprecated use {@link #salesReturns} */
+    private Double billRefundsCashUpi;
 
     /**
      * Sum of {@code paid_amount} for bills <strong>issued</strong> on {@code date} (matches "Total Paid" on bills table).
@@ -52,9 +74,20 @@ public class DailyClosingReportDTO {
     /**
      * Amounts collected in the period by mode (bill payments + advance deposits). Keys typically include
      * {@code CASH}, {@code UPI}, {@code BANK_TRANSFER}, {@code CHEQUE}, and {@code OTHER}.
+     * Does not include loan funding — see {@link #loanReceiptsByMode}.
      */
     @Builder.Default
     private Map<String, Double> paymentSummary = new LinkedHashMap<>();
+
+    /**
+     * Loan received in the period ({@code transactions}, category {@code LOAN}, direction {@code IN})
+     * by payment mode ({@code CASH}, {@code UPI}, …). Separate from sales collections.
+     */
+    @Builder.Default
+    private Map<String, Double> loanReceiptsByMode = new LinkedHashMap<>();
+
+    /** Sum of {@link #loanReceiptsByMode} (cash/UPI/bank loan receipts in period). */
+    private Double totalLoanReceipts;
 
     /** Non-fatal notices (e.g. large date range, reconciliation mismatch). */
     @Builder.Default

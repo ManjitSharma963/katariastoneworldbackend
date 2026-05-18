@@ -7,7 +7,7 @@
 --   • Reports / balances: WHERE status = 'active' only.
 --   • One row = one atomic economic event (no rolled-up summaries in this table).
 --
--- Replacing legacy daily_budget / daily_budget_events:
+-- Primary money ledger (replaces removed daily_budget* and financial_ledger tables):
 --   • Use location + date_time + direction/amount + payment_mode to rebuild
 --     per-day cash/UPI/bank flows and running balances.
 --   • Migrate existing ledger-like rows into this table, then retire old tables
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   -- Physical / rail channel. 'bank' covers NEFT/RTGS/card/cheque unless you split later.
   payment_mode ENUM('cash', 'upi', 'bank') NOT NULL,
 
-  -- Branch / store scope (replaces location-scoped daily_budget rows)
+  -- Branch / store scope
   location VARCHAR(64) NOT NULL DEFAULT '',
 
   -- Optional tenant / owner scope for multi-user deployments (nullable = global/system)

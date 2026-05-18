@@ -30,4 +30,10 @@ public class BillInventoryReturnLine {
 
     @Column(name = "quantity_returned", nullable = false, precision = 14, scale = 2)
     private BigDecimal quantityReturned;
+
+    @Column(name = "unit_price_at_return", precision = 14, scale = 2)
+    private BigDecimal unitPriceAtReturn;
+
+    @Column(name = "line_return_value", precision = 14, scale = 2)
+    private BigDecimal lineReturnValue;
 }

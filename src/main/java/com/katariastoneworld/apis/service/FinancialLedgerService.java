@@ -92,6 +92,53 @@ public class FinancialLedgerService {
                 "Customer advance refund customerId=" + customerId);
     }
 
+    /**
+     * Bill edit (Non-GST replace): excess paid over new total → customer wallet store credit.
+     * {@code transactions} row is OUT (same sense as advance refund); keyed by {@code walletTxnId}.
+     */
+    public void recordBillEditStoreCredit(String location, Long customerId, Long walletTxnId, BigDecimal amount,
+            LocalDate eventDate) {
+        if (location == null || location.isBlank() || walletTxnId == null || amount == null) {
+            return;
+        }
+        BigDecimal amt = amount.setScale(2, java.math.RoundingMode.HALF_UP);
+        if (amt.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        recordTransaction(
+                location.trim(),
+                eventDate != null ? eventDate : LocalDate.now(),
+                amt,
+                LedgerTransactionType.DEBIT,
+                LedgerPaymentMode.CASH,
+                LedgerSources.BILL_EDIT_ADJUSTMENT,
+                walletTxnId,
+                "Bill edit excess → store credit customerId=" + customerId);
+    }
+
+    /**
+     * Physical stock return: return value credited to wallet (synced DEBIT keyed by wallet row id — same sense as bill edit excess).
+     */
+    public void recordBillReturnWalletCredit(String location, Long customerId, Long walletTxnId, BigDecimal amount,
+            LocalDate eventDate) {
+        if (location == null || location.isBlank() || walletTxnId == null || amount == null) {
+            return;
+        }
+        BigDecimal amt = amount.setScale(2, java.math.RoundingMode.HALF_UP);
+        if (amt.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        recordTransaction(
+                location.trim(),
+                eventDate != null ? eventDate : LocalDate.now(),
+                amt,
+                LedgerTransactionType.DEBIT,
+                LedgerPaymentMode.CASH,
+                LedgerSources.BILL_RETURN_WALLET_CREDIT,
+                walletTxnId,
+                "Bill return → wallet credit customerId=" + customerId);
+    }
+
     public void recordClientPaymentIn(String location, String clientId, Long clientTransactionId, BillPaymentMode mode,
             BigDecimal amount, LocalDate eventDate) {
         if (location == null || location.isBlank() || clientTransactionId == null || mode == null || amount == null) {

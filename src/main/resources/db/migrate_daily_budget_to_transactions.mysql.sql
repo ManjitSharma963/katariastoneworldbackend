@@ -1,4 +1,5 @@
 -- =============================================================================
+-- ARCHIVED — one-time migration (tables daily_budget* removed; do not run on new DBs).
 -- Migrate legacy daily_budget_events → transactions (MySQL 8.0+)
 -- Goal: stop depending on daily_budget_events / daily_budget for history.
 --

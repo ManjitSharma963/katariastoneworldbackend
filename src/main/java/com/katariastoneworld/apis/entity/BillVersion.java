@@ -51,6 +51,13 @@ public class BillVersion {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * Revision head marker: {@code ACTIVE} for the open snapshot row; {@code SUPERSEDED} once a newer {@code bill_versions}
+     * row exists for the same bill. Legacy rows may be null until backfilled.
+     */
+    @Column(name = "lifecycle_status", length = 20)
+    private String lifecycleStatus;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {

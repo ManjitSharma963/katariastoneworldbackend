@@ -27,6 +27,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * Product catalog and <b>on-hand quantity</b> ({@link Product#getQuantity()} → DB {@code total_sqft_stock}).
+ * <p>Stock-changing APIs here pair every cache update with an {@link InventoryTransactionService#append} row
+ * (see {@code inventory_transactions}). Bill edit flows ({@link BillService}) must use these methods — not direct
+ * {@code product.setQuantity} + save — so stock is never modified without a ledger line.
+ */
 @Service
 @Transactional
 public class ProductService {
@@ -164,6 +170,23 @@ public class ProductService {
                 beforeSnapshot,
                 createdSnapshot,
                 "Initial product details on creation");
+
+        BigDecimal openingQty = savedProduct.getQuantity() != null
+                ? savedProduct.getQuantity().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        if (openingQty.compareTo(BigDecimal.ZERO) > 0) {
+            inventoryTransactionService.append(
+                    savedProduct.getId(),
+                    InventoryTxnType.OPENING,
+                    InventoryDirection.IN,
+                    openingQty,
+                    InventoryReferenceType.MANUAL,
+                    null,
+                    null,
+                    "Initial stock on product creation",
+                    null,
+                    null);
+        }
 
         return createdSnapshot;
     }
@@ -374,7 +397,7 @@ public class ProductService {
      * Validate stock availability without deducting
      * @param productId The ID of the product
      * @param quantityToDeduct The quantity (in sqft) to validate
-     * @throws RuntimeException if product not found or insufficient stock
+     * @throws IllegalArgumentException if product not found or insufficient stock
      */
     public void validateStockAvailability(Long productId, BigDecimal quantityToDeduct) {
         Product product = productRepository.findById(productId)
@@ -387,7 +410,7 @@ public class ProductService {
         BigDecimal newStock = available.subtract(quantityToDeduct);
         
         if (newStock.compareTo(BigDecimal.ZERO) < 0) {
-            throw new RuntimeException("Insufficient stock for product: " + product.getName() + 
+            throw new IllegalArgumentException("Insufficient stock for product: " + product.getName() +
                     ". Available (after reservations): " + available + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
     }
@@ -429,7 +452,7 @@ public class ProductService {
         BigDecimal newStock = currentStock.subtract(quantityToDeduct);
 
         if (available.subtract(quantityToDeduct).compareTo(BigDecimal.ZERO) < 0) {
-            throw new RuntimeException("Insufficient stock for product: " + product.getName() +
+            throw new IllegalArgumentException("Insufficient stock for product: " + product.getName() +
                     ". Available (after reservations): " + available + " " + unit + ", Requested: " + quantityToDeduct + " " + unit);
         }
 

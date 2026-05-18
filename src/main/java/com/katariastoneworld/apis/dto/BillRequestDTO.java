@@ -115,6 +115,13 @@ public class BillRequestDTO {
     private String supplementaryReason;
 
     /**
+     * Non-GST full bill replace only. When prior cash + advance on the bill exceeded the new total after edit,
+     * default {@code STORE_CREDIT} posts a customer wallet CREDIT ({@code BILL_EDIT_ADJUSTMENT}). {@code NONE} skips
+     * automatic store credit (handle cash refund outside the app).
+     */
+    private String excessPaymentHandling = "STORE_CREDIT";
+
+    /**
      * Optional operator note. On create, stored on the bill header. On full replace (PUT), if non-blank,
      * a dated block is appended to existing bill notes. Clients may send {@code description} instead of {@code notes}.
      */

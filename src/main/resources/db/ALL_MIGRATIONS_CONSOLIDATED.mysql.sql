@@ -346,29 +346,7 @@ UPDATE customer_advance
 SET payment_mode = 'CASH'
 WHERE payment_mode IS NULL OR TRIM(payment_mode) = '';
 
--- =============================================================================
--- SECTION M — financial_ledger.mysql.sql
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS financial_ledger (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    event_type VARCHAR(32) NOT NULL,
-    source_type VARCHAR(32) NOT NULL,
-    source_id VARCHAR(64) NOT NULL,
-    location VARCHAR(50) NOT NULL,
-    bill_kind VARCHAR(16) NULL,
-    bill_id BIGINT NULL,
-    customer_id BIGINT NULL,
-    payment_mode VARCHAR(32) NOT NULL,
-    amount DECIMAL(14,2) NOT NULL,
-    in_hand_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
-    event_date DATE NOT NULL,
-    created_at DATETIME(6) NOT NULL,
-    CONSTRAINT uk_fin_ledger_source UNIQUE (source_type, source_id)
-);
-
-CALL ensure_index('financial_ledger', 'idx_fin_ledger_loc_date', 'location, event_date', 0);
-CALL ensure_index('financial_ledger', 'idx_fin_ledger_mode_date', 'payment_mode, event_date', 0);
+-- SECTION M (financial_ledger) removed — use transactions table; see drop_legacy_ledger_tables.mysql.sql
 
 -- =============================================================================
 -- SECTION N — audit_softdelete_indexes.mysql.sql

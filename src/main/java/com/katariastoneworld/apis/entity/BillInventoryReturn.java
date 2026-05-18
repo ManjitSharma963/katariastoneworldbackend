@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -40,6 +41,21 @@ public class BillInventoryReturn {
 
     @Column(name = "created_by_user_id")
     private Long createdByUserId;
+
+    @Column(name = "refund_mode", length = 32)
+    private String refundMode;
+
+    @Column(name = "refund_amount", precision = 14, scale = 2)
+    private BigDecimal refundAmount = BigDecimal.ZERO;
+
+    @Column(name = "settled", nullable = false)
+    private Boolean settled = false;
+
+    @Column(name = "settled_at")
+    private LocalDateTime settledAt;
+
+    @Column(name = "adjustment_group_id", length = 64)
+    private String adjustmentGroupId;
 
     @OneToMany(mappedBy = "header", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BillInventoryReturnLine> lines = new ArrayList<>();

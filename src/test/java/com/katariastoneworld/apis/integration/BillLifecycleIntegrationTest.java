@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.integration;
 
+import com.katariastoneworld.apis.constants.BillLifecycleStatus;
 import com.katariastoneworld.apis.dto.BillItemDTO;
 import com.katariastoneworld.apis.dto.BillRequestDTO;
 import com.katariastoneworld.apis.dto.BillResponseDTO;
@@ -7,6 +8,8 @@ import com.katariastoneworld.apis.dto.BillStockReturnLineRequestDTO;
 import com.katariastoneworld.apis.dto.BillStockReturnRequestDTO;
 import com.katariastoneworld.apis.dto.ProductRequestDTO;
 import com.katariastoneworld.apis.dto.ProductResponseDTO;
+import com.katariastoneworld.apis.entity.BillNonGST;
+import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.service.BillNumberGeneratorService;
 import com.katariastoneworld.apis.service.BillService;
 import com.katariastoneworld.apis.service.EmailService;
@@ -31,6 +34,9 @@ class BillLifecycleIntegrationTest {
 
     @Autowired
     private BillService billService;
+
+    @Autowired
+    private BillNonGSTRepository billNonGSTRepository;
 
     @MockBean
     private EmailService emailService;
@@ -84,6 +90,9 @@ class BillLifecycleIntegrationTest {
         partialReturn.setLines(List.of(new BillStockReturnLineRequestDTO(lineId, 4.0)));
 
         billService.recordPartialStockReturn(createdBill.getId(), "nongst", partialReturn, location, actor);
+
+        BillNonGST afterReturn = billNonGSTRepository.findById(createdBill.getId()).orElseThrow();
+        assertThat(afterReturn.getBillStatus()).isEqualTo(BillLifecycleStatus.PARTIALLY_RETURNED);
 
         ProductResponseDTO afterPartialReturn = productService.getProductById(createdProduct.getId(), location);
         assertThat(afterPartialReturn.getQuantity()).isEqualTo(94.0);

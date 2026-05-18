@@ -49,6 +49,7 @@ public class ClientPurchaseService {
         clientPurchase.setNotes(requestDTO.getNotes());
         clientPurchase.setLocation(location);
         ClientPurchase saved = clientPurchaseRepository.save(clientPurchase);
+        recordPurchaseCreditTransaction(saved, location);
         BigDecimal paid = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         return convertToResponseDTO(saved, paid);
     }
@@ -109,7 +110,7 @@ public class ClientPurchaseService {
         ClientPurchasePayment saved = clientPurchasePaymentRepository.save(payment);
 
         ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
-        tx.setClientId(requestDTO.getClientId());
+        tx.setClientId(resolveClientKey(clientPurchase, requestDTO.getClientId()));
         tx.setTransactionType("PAYMENT_OUT");
         tx.setAmount(requestDTO.getAmount());
         tx.setPaymentMode(requestDTO.getPaymentMethod());
@@ -222,5 +223,32 @@ public class ClientPurchaseService {
         dto.setCreatedAt(payment.getCreatedAt());
         dto.setUpdatedAt(payment.getUpdatedAt());
         return dto;
+    }
+
+    private static String resolveClientKey(ClientPurchase purchase, String requestClientId) {
+        if (purchase != null && purchase.getClientName() != null && !purchase.getClientName().isBlank()) {
+            return purchase.getClientName().trim();
+        }
+        if (requestClientId != null && !requestClientId.isBlank()) {
+            return requestClientId.trim();
+        }
+        return "";
+    }
+
+    /** Payable entry in client ledger (no cash movement until {@code PAYMENT_OUT}). */
+    private void recordPurchaseCreditTransaction(ClientPurchase purchase, String location) {
+        if (purchase == null || purchase.getClientName() == null || purchase.getClientName().isBlank()
+                || purchase.getTotalAmount() == null) {
+            return;
+        }
+        ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
+        tx.setClientId(purchase.getClientName().trim());
+        tx.setTransactionType("PURCHASE");
+        tx.setAmount(purchase.getTotalAmount());
+        tx.setPaymentMode("CASH");
+        tx.setTransactionDate(purchase.getPurchaseDate() != null ? purchase.getPurchaseDate() : LocalDate.now());
+        String desc = purchase.getPurchaseDescription() != null ? purchase.getPurchaseDescription().trim() : "Purchase";
+        tx.setNotes("Purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
+        clientTransactionService.create(tx, location, null);
     }
 }

@@ -22,7 +22,7 @@ public class InHandReconciliationDTO {
     /** Sum of bill_payments.amount where mode is CASH or UPI, bill not deleted, payment not deleted. */
     private BigDecimal billCashUpiTotal;
 
-    /** Sum of financial_ledger.in_hand_amount for BILL_PAYMENT rows (active ledger entries only). */
+    /** Sum of BILL-category CASH/UPI amounts in transactions for the date range. */
     private BigDecimal ledgerBillPaymentInHandTotal;
 
     /** billCashUpiTotal minus ledgerBillPaymentInHandTotal (should be ~0 when consistent). */
@@ -30,9 +30,6 @@ public class InHandReconciliationDTO {
 
     private boolean match;
 
-    /**
-     * Why daily_budget_events may still show rows after a bill is deleted: reversals append IN_HAND_DECREASE /
-     * IN_HAND_INCREASE deltas; the ledger row is removed so totals match; event history is append-only.
-     */
+    /** Human-readable explanation of what was compared. */
     private String notes;
 }

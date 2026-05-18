@@ -43,27 +43,7 @@ public class ClientTransactionService {
         tx.setLocation(location);
         tx.setCreatedBy(actorUserId);
         ClientTransaction saved = clientTransactionRepository.save(tx);
-
-        if (type == ClientTransactionType.PAYMENT_OUT || type == ClientTransactionType.PURCHASE) {
-            financialLedgerService.recordClientPaymentOut(
-                    location,
-                    saved.getClientId(),
-                    saved.getId(),
-                    mode,
-                    amt,
-                    d
-            );
-        } else if (type == ClientTransactionType.PAYMENT_IN) {
-            financialLedgerService.recordClientPaymentIn(
-                    location,
-                    saved.getClientId(),
-                    saved.getId(),
-                    mode,
-                    amt,
-                    d
-            );
-        }
-
+        syncCashLedger(saved, location, mode, amt, d);
         return toDto(saved, null);
     }
 
@@ -91,8 +71,9 @@ public class ClientTransactionService {
         }
         String loc = location.trim();
         String cid = clientId.trim();
+        String keyLower = cid.toLowerCase(java.util.Locale.ROOT);
         List<ClientTransaction> rows = clientTransactionRepository.findByLocationOrderByTransactionDateDescIdDesc(loc).stream()
-                .filter(t -> cid.equalsIgnoreCase(t.getClientId() != null ? t.getClientId().trim() : ""))
+                .filter(t -> matchesClientKey(t, keyLower))
                 .sorted(Comparator
                         .comparing(ClientTransaction::getTransactionDate)
                         .thenComparing(ClientTransaction::getId))
@@ -107,9 +88,45 @@ public class ClientTransactionService {
         return out;
     }
 
+    private void syncCashLedger(ClientTransaction saved, String location, BillPaymentMode mode, BigDecimal amt,
+            LocalDate d) {
+        if (saved.getTransactionType() == ClientTransactionType.PAYMENT_OUT) {
+            financialLedgerService.recordClientPaymentOut(
+                    location,
+                    saved.getClientId(),
+                    saved.getId(),
+                    mode,
+                    amt,
+                    d);
+        } else if (saved.getTransactionType() == ClientTransactionType.PAYMENT_IN) {
+            financialLedgerService.recordClientPaymentIn(
+                    location,
+                    saved.getClientId(),
+                    saved.getId(),
+                    mode,
+                    amt,
+                    d);
+        }
+        // PURCHASE rows are credit/payable only — cash moves on PAYMENT_OUT.
+    }
+
+    private static boolean matchesClientKey(ClientTransaction row, String keyLower) {
+        if (row == null || keyLower.isBlank()) {
+            return false;
+        }
+        String id = row.getClientId() != null ? row.getClientId().trim().toLowerCase(java.util.Locale.ROOT) : "";
+        if (keyLower.equals(id)) {
+            return true;
+        }
+        String notes = row.getNotes() != null ? row.getNotes().toLowerCase(java.util.Locale.ROOT) : "";
+        return notes.contains("payment to " + keyLower)
+                || (notes.contains("purchase on credit") && notes.contains(keyLower));
+    }
+
     private static BigDecimal signedAmount(ClientTransaction row) {
         BigDecimal a = row.getAmount() != null ? row.getAmount().setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-        if (row.getTransactionType() == ClientTransactionType.PAYMENT_IN) {
+        if (row.getTransactionType() == ClientTransactionType.PAYMENT_IN
+                || row.getTransactionType() == ClientTransactionType.PURCHASE) {
             return a;
         }
         return a.negate();
