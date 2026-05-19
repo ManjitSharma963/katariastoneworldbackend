@@ -179,7 +179,8 @@ public class BillController {
     }
 
     @Operation(summary = "Cancelled bills (audit)",
-            description = "Immutable log of bills cancelled via delete, for the branch. Filtered by bill date (inclusive). "
+            description = "Immutable log of bills cancelled via delete, for the branch. "
+                    + "Matches bill date OR cancellation date in the inclusive range. "
                     + "Defaults: last 30 days through today if params omitted.")
     @GetMapping("/cancellations")
     @RequiresRole({ "user", "admin" })

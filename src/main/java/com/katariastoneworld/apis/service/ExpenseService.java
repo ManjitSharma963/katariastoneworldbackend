@@ -4,10 +4,8 @@ import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
 import com.katariastoneworld.apis.dto.ExpenseResponseDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
-import com.katariastoneworld.apis.entity.LedgerPaymentMode;
-import com.katariastoneworld.apis.entity.LedgerSources;
-import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.ReferenceType;
+import com.katariastoneworld.apis.accounting.support.ExpenseAccountingBridge;
 import com.katariastoneworld.apis.repository.ExpenseRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
@@ -33,7 +31,7 @@ public class ExpenseService {
     private LoanLedgerService loanLedgerService;
 
     @Autowired
-    private FinancialLedgerService financialLedgerService;
+    private ExpenseAccountingBridge expenseAccountingBridge;
 
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
         Expense expense = new Expense();
@@ -154,9 +152,7 @@ public class ExpenseService {
             throw new RuntimeException("Expense not found with id: " + id);
         }
         loanLedgerService.deleteRepaymentByExpenseId(expense.getId());
-        financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
-        financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
-        financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
+        expenseAccountingBridge.voidExpenseMoneyLines(expense, "expense deleted");
         log.info("expense_delete location={} id={} amount={} date={}",
                 expense.getLocation(), expense.getId(), expense.getAmount(), expense.getDate());
         expense.setIsDeleted(true);
@@ -167,34 +163,7 @@ public class ExpenseService {
      * Payroll-mirrored expenses use SALARY_* only; synced loan repayments use LOAN_REPAY from {@link LoanLedgerService}.
      */
     private void syncUnifiedLedgerForExpense(Expense expense) {
-        if (expense == null || expense.getId() == null || expense.getAmount() == null) {
-            return;
-        }
-        if (expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
-            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
-            return;
-        }
-        if (expense.getReferenceType() == ReferenceType.PAYROLL) {
-            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
-            return;
-        }
-        if (loanLedgerService.isSyncedLoanRepaymentExpense(expense)
-                && loanLedgerService.hasRepaymentLedgerRowForExpense(expense.getId())) {
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.EXPENSE, expense.getId());
-            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
-            return;
-        }
-        financialLedgerService.recordTransaction(
-                expense.getLocation(),
-                expense.getDate(),
-                expense.getAmount(),
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.fromLegacyPaymentMethod(expense.getPaymentMethod()),
-                LedgerSources.EXPENSE,
-                expense.getId(),
-                expense.getDescription());
+        expenseAccountingBridge.syncExpenseLedger(expense);
     }
 
     private ExpenseResponseDTO convertToResponseDTO(Expense expense) {

@@ -17,6 +17,8 @@ import com.katariastoneworld.apis.dto.BillReturnRefundMode;
 import com.katariastoneworld.apis.dto.BillCancellationLogDTO;
 import com.katariastoneworld.apis.dto.BillEventResponseDTO;
 import com.katariastoneworld.apis.constants.BillLifecycleStatus;
+import com.katariastoneworld.apis.accounting.support.BillPaymentAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.RefundAccountingBridge;
 import com.katariastoneworld.apis.constants.MoneyLedgerCategories;
 import com.katariastoneworld.apis.entity.BillEvent;
 import com.katariastoneworld.apis.entity.BillGST;
@@ -188,6 +190,12 @@ public class BillService {
 
     @Autowired
     private FinancialLedgerService financialLedgerService;
+
+    @Autowired
+    private BillPaymentAccountingBridge billPaymentAccountingBridge;
+
+    @Autowired
+    private RefundAccountingBridge refundAccountingBridge;
 
     @Autowired
     private BillEventService billEventService;
@@ -2050,7 +2058,8 @@ public class BillService {
     }
 
     /**
-     * Cancelled-bill audit for the branch, filtered by bill date (inclusive).
+     * Cancelled-bill audit for the branch. Matches rows whose bill date OR cancellation time
+     * falls in the inclusive date range (so a bill cancelled today appears even if bill date is older).
      */
     public List<BillCancellationLogDTO> getBillCancellationLogs(String location, LocalDate billDateFrom, LocalDate billDateTo) {
         String loc = location == null ? "" : location.trim();
@@ -2062,8 +2071,10 @@ public class BillService {
         if (to.isBefore(from)) {
             throw new IllegalArgumentException("billDateTo must be on or after billDateFrom");
         }
+        LocalDateTime cancelledFrom = from.atStartOfDay();
+        LocalDateTime cancelledToExclusive = to.plusDays(1).atStartOfDay();
         return billCancellationLogRepository
-                .findByLocationAndBillDateBetweenOrderByCancelledAtDesc(loc, from, to)
+                .findForPeriodByBillDateOrCancelledAt(loc, from, to, cancelledFrom, cancelledToExclusive)
                 .stream()
                 .map(this::toCancellationLogDto)
                 .collect(Collectors.toList());
@@ -3695,7 +3706,7 @@ public class BillService {
                     billNumber,
                     stockReturnId);
             if (wId != null) {
-                financialLedgerService.recordBillReturnWalletCredit(
+                refundAccountingBridge.postBillReturnWalletCredit(
                         location != null ? location.trim() : "", customer.getId(), wId, settlementAmount, eventDate);
             }
             return;
@@ -3703,55 +3714,23 @@ public class BillService {
         if (mode == BillReturnRefundMode.ADVANCE_RESTORE) {
             return;
         }
-        String txnType = "STOCK_RETURN_" + stockReturnId;
-        if (moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
-                MoneyReferenceType.bill, billId, txnType)) {
-            return;
-        }
-        BigDecimal amount = settlementAmount.setScale(2, RoundingMode.HALF_UP);
-        MoneyPaymentMode paymentMode;
-        if (mode == BillReturnRefundMode.BANK_REFUND) {
-            paymentMode = MoneyPaymentMode.BANK;
-        } else {
-            String rawRail = legacyRefundPaymentModeRaw != null && !legacyRefundPaymentModeRaw.isBlank()
-                    ? legacyRefundPaymentModeRaw.trim()
-                    : "CASH";
-            BillPaymentMode billMode = parseBillPaymentMode(rawRail);
-            if (billMode == BillPaymentMode.BANK_TRANSFER || billMode == BillPaymentMode.CHEQUE) {
-                paymentMode = MoneyPaymentMode.BANK;
-            } else {
-                paymentMode = mapPaymentMode(billMode.name());
-            }
-        }
-        String partyName = customer != null && customer.getCustomerName() != null && !customer.getCustomerName().isBlank()
-                ? customer.getCustomerName().trim()
-                : (customer != null && customer.getId() != null ? ("Customer_" + customer.getId()) : "Customer_Unknown");
-        MoneyTransaction tx = new MoneyTransaction();
-        tx.setAmount(amount);
-        tx.setDirection(MoneyDirection.OUT);
-        tx.setCategory(MoneyCategory.BILL_RETURN);
-        tx.setSubCategory(MoneyLedgerCategories.SUB_CUSTOMER_REFUND);
-        tx.setTxnType(txnType);
-        tx.setPartyId(customer != null ? customer.getId() : null);
-        tx.setPartyName(partyName);
-        tx.setPaymentMode(paymentMode);
-        tx.setReferenceType(MoneyReferenceType.bill);
-        tx.setReferenceId(billId);
-        tx.setNotes("Stock return settlement | BillNo: " + (billNumber != null ? billNumber : ("#" + billId))
-                + " | returnId=" + stockReturnId + " | mode=" + mode);
-        tx.setTransactionDate(billBusinessDate != null ? billBusinessDate : LocalDate.now());
-        tx.setDateTime(LocalDateTime.now());
-        tx.setLocation(location != null ? location.trim() : "");
-        tx.setOwnerUserId(actorUserId);
-        tx.setStatus(MoneyTxnStatus.ACTIVE);
-        tx.setIsDeleted(false);
-        billInventoryReturnRepository.findById(stockReturnId).ifPresent(ret -> {
-            if (ret.getAdjustmentGroupId() != null && !ret.getAdjustmentGroupId().isBlank()) {
-                tx.setAdjustmentGroupId(ret.getAdjustmentGroupId().trim());
-                tx.setLinkedGroupId(ret.getAdjustmentGroupId().trim());
-            }
-        });
-        moneyTransactionRepository.save(tx);
+        String adjustmentGroupId = billInventoryReturnRepository.findById(stockReturnId)
+                .map(BillInventoryReturn::getAdjustmentGroupId)
+                .filter(g -> g != null && !g.isBlank())
+                .map(String::trim)
+                .orElse(null);
+        refundAccountingBridge.postStockReturnCashRefund(
+                billId,
+                stockReturnId,
+                mode,
+                settlementAmount,
+                legacyRefundPaymentModeRaw,
+                billNumber,
+                location,
+                customer,
+                actorUserId,
+                billBusinessDate,
+                adjustmentGroupId);
     }
 
     private static BigDecimal nz(BigDecimal b) {
@@ -4560,126 +4539,12 @@ public class BillService {
      * Soft-voids active {@code transactions} rows for a bill payment (wallet advance mirror rows only).
      */
     private void voidActiveMoneyTransactionsForBillPayment(Long billPaymentId) {
-        if (billPaymentId == null) {
-            return;
-        }
-        List<MoneyTransaction> rows = moneyTransactionRepository
-                .findByBillPaymentIdAndIsDeletedFalseOrderByIdAsc(billPaymentId);
-        if (rows.isEmpty()) {
-            return;
-        }
-        for (MoneyTransaction tx : rows) {
-            tx.setIsDeleted(true);
-            tx.setStatus(MoneyTxnStatus.CANCELLED);
-        }
-        moneyTransactionRepository.saveAll(rows);
+        billPaymentAccountingBridge.voidBillPaymentLedger(billPaymentId, "bill payment voided");
     }
 
     private void createTransactionFromBillPayment(BillPayment payment, Long billVersionId, String linkedGroupId,
             String txnType) {
-        if (payment == null || payment.getBillId() == null || payment.getAmount() == null
-                || payment.getAmount().compareTo(BigDecimal.ZERO) == 0) {
-            return;
-        }
-
-        Long billId = payment.getBillId();
-        BillKind kind = payment.getBillKind() != null ? payment.getBillKind() : BillKind.NON_GST;
-        String billNumber = null;
-        String location = "";
-        Long customerId = null;
-        String customerName = null;
-        boolean supplementaryChildBill = false;
-
-        if (kind == BillKind.GST) {
-            BillGST bill = billGSTRepository.findById(billId).orElse(null);
-            if (bill == null) {
-                return;
-            }
-            billNumber = bill.getBillNumber();
-            location = bill.getLocation() != null ? bill.getLocation().trim() : "";
-            if (bill.getCustomer() != null) {
-                customerId = bill.getCustomer().getId();
-                customerName = bill.getCustomer().getCustomerName();
-            }
-        } else {
-            BillNonGST bill = billNonGSTRepository.findById(billId).orElse(null);
-            if (bill == null) {
-                return;
-            }
-            billNumber = bill.getBillNumber();
-            location = bill.getLocation() != null ? bill.getLocation().trim() : "";
-            if (bill.getCustomer() != null) {
-                customerId = bill.getCustomer().getId();
-                customerName = bill.getCustomer().getCustomerName();
-            }
-            supplementaryChildBill = Boolean.TRUE.equals(bill.getSupplementaryBill());
-        }
-
-        MoneyPaymentMode paymentMode = mapPaymentMode(
-                payment.getPaymentMode() != null ? payment.getPaymentMode().name() : null);
-        BigDecimal rawAmount = payment.getAmount().setScale(2, RoundingMode.HALF_UP);
-        BigDecimal amount = rawAmount.abs();
-        MoneyDirection direction = rawAmount.compareTo(BigDecimal.ZERO) >= 0 ? MoneyDirection.IN : MoneyDirection.OUT;
-        String normalizedTxnType = txnType != null ? txnType.trim().toUpperCase(Locale.ROOT) : "BILL_PAYMENT";
-        boolean reversalTxn = normalizedTxnType.contains("REVERSAL");
-
-        // Prefer 1:1 idempotency on bill_payments.id (allows two same-amount CASH lines on one bill).
-        if (payment.getId() != null
-                && moneyTransactionRepository.existsByBillPaymentIdAndIsDeletedFalse(payment.getId())) {
-            return;
-        }
-        if (!reversalTxn && payment.getId() == null
-                && moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndAmountAndPaymentMode(
-                        MoneyReferenceType.bill, billId, amount, paymentMode)) {
-            return;
-        }
-
-        String partyName = (customerName != null && !customerName.trim().isEmpty())
-                ? customerName.trim()
-                : (customerId != null ? ("Customer_" + customerId) : "Customer_Unknown");
-
-        MoneyTransaction tx = new MoneyTransaction();
-        tx.setAmount(amount);
-        tx.setDirection(direction);
-        if (reversalTxn) {
-            tx.setCategory(MoneyCategory.BILL_REVERSAL);
-            tx.setTxnType("BILL_REVERSAL");
-            tx.setSubCategory(MoneyLedgerCategories.SUB_BILL_CANCELLATION);
-        } else {
-            tx.setCategory(MoneyCategory.BILL);
-            tx.setTxnType(normalizedTxnType);
-            if (kind == BillKind.NON_GST && supplementaryChildBill) {
-                tx.setSubCategory(MoneyLedgerCategories.SUB_ADJUSTMENT_PAYMENT);
-            } else {
-                tx.setSubCategory(resolveBillPaymentSubCategory(normalizedTxnType));
-            }
-        }
-        tx.setPartyId(customerId);
-        tx.setPartyName(partyName);
-        tx.setPaymentMode(paymentMode);
-        tx.setReferenceType(MoneyReferenceType.bill);
-        tx.setReferenceId(billId); // IMPORTANT: bill.id (not bill_payment.id)
-        tx.setBillPaymentId(payment.getId());
-        tx.setBillVersionId(billVersionId);
-        tx.setLinkedGroupId(linkedGroupId);
-        if (reversalTxn) {
-            tx.setNotes("Bill cancellation refund to customer | BillNo: "
-                    + (billNumber != null ? billNumber : ("#" + billId)));
-        } else {
-            tx.setNotes(normalizedTxnType + " | BillNo: " + (billNumber != null ? billNumber : ("#" + billId)));
-        }
-        tx.setTransactionDate(payment.getPaymentDate() != null ? payment.getPaymentDate() : LocalDate.now());
-        tx.setDateTime(LocalDateTime.now());
-        tx.setLocation(location);
-        tx.setOwnerUserId(payment.getCreatedBy());
-        tx.setStatus(MoneyTxnStatus.ACTIVE);
-        tx.setIsDeleted(false);
-        if (reversalTxn && payment.getReversalOfId() != null) {
-            moneyTransactionRepository
-                    .findFirstByBillPaymentIdAndIsDeletedFalseOrderByIdAsc(payment.getReversalOfId())
-                    .ifPresent(orig -> tx.setReversalOfId(orig.getId()));
-        }
-        moneyTransactionRepository.save(tx);
+        billPaymentAccountingBridge.postBillPaymentLedger(payment, billVersionId, linkedGroupId, txnType);
     }
 
     /** Links {@code transactions.reversal_of_id} on store-credit money row to an original bill payment IN row. */
@@ -4745,20 +4610,6 @@ public class BillService {
                 bill.getBillDate() != null ? bill.getBillDate() : LocalDate.now());
         patchBillEditStoreCreditMoneyReversal(walletTxnId, anchorOriginalBillPaymentMoneyTxnId);
         return excess;
-    }
-
-    /**
-     * Ledger sub_category aligned with {@code txn_type}: BILL_PAYMENT, BILL_PAYMENT_REVERSAL, ADVANCE_APPLICATION.
-     */
-    private static String resolveBillPaymentSubCategory(String normalizedTxnType) {
-        String t = normalizedTxnType != null ? normalizedTxnType.trim().toUpperCase(Locale.ROOT) : "BILL_PAYMENT";
-        if (t.contains("REVERSAL")) {
-            return "BILL_PAYMENT_REVERSAL";
-        }
-        if ("ADVANCE_APPLICATION".equals(t)) {
-            return "ADVANCE_APPLICATION";
-        }
-        return "BILL_PAYMENT";
     }
 
     /** CASH->CASH, UPI->UPI, BANK_TRANSFER->BANK, WALLET->UPI. */

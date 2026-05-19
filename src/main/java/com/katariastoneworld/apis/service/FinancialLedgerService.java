@@ -1,5 +1,9 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.accounting.support.ClientTransactionAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.CustomerAdvanceAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.RefundAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.UnifiedLedgerVoidRouter;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerPaymentMode;
 import com.katariastoneworld.apis.entity.LedgerSources;
@@ -22,6 +26,18 @@ public class FinancialLedgerService {
     @Autowired
     private MoneyTransactionService moneyTransactionService;
 
+    @Autowired
+    private RefundAccountingBridge refundAccountingBridge;
+
+    @Autowired
+    private CustomerAdvanceAccountingBridge customerAdvanceAccountingBridge;
+
+    @Autowired
+    private ClientTransactionAccountingBridge clientTransactionAccountingBridge;
+
+    @Autowired
+    private UnifiedLedgerVoidRouter unifiedLedgerVoidRouter;
+
     public void recordTransaction(
             String location,
             LocalDate date,
@@ -35,6 +51,9 @@ public class FinancialLedgerService {
     }
 
     public void removeTransaction(String location, String source, Long referenceId) {
+        if (unifiedLedgerVoidRouter.tryVoid(location, source, referenceId, "transaction removed")) {
+            return;
+        }
         moneyTransactionService.removeSyncedLine(location, source, referenceId);
     }
 
@@ -61,34 +80,15 @@ public class FinancialLedgerService {
         if (amt.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.CREDIT,
-                LedgerPaymentMode.fromBillPaymentMode(mode),
-                LedgerSources.ADVANCE,
-                advanceId,
+        customerAdvanceAccountingBridge.postAdvanceDeposit(
+                location, customerId, advanceId, mode, amt, eventDate,
                 "Customer advance deposit customerId=" + customerId);
     }
 
     public void recordAdvanceRefund(String location, Long customerId, Long refundTxnId, BillPaymentMode mode, BigDecimal amount,
             LocalDate eventDate) {
-        if (location == null || location.isBlank() || refundTxnId == null || mode == null || amount == null) {
-            return;
-        }
-        BigDecimal amt = amount.setScale(2, java.math.RoundingMode.HALF_UP);
-        if (amt.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.fromBillPaymentMode(mode),
-                LedgerSources.ADVANCE_REFUND,
-                refundTxnId,
+        refundAccountingBridge.postAdvanceRefund(
+                location, customerId, refundTxnId, mode, amount, eventDate,
                 "Customer advance refund customerId=" + customerId);
     }
 
@@ -98,22 +98,7 @@ public class FinancialLedgerService {
      */
     public void recordBillEditStoreCredit(String location, Long customerId, Long walletTxnId, BigDecimal amount,
             LocalDate eventDate) {
-        if (location == null || location.isBlank() || walletTxnId == null || amount == null) {
-            return;
-        }
-        BigDecimal amt = amount.setScale(2, java.math.RoundingMode.HALF_UP);
-        if (amt.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.CASH,
-                LedgerSources.BILL_EDIT_ADJUSTMENT,
-                walletTxnId,
-                "Bill edit excess → store credit customerId=" + customerId);
+        refundAccountingBridge.postBillEditStoreCredit(location, customerId, walletTxnId, amount, eventDate);
     }
 
     /**
@@ -121,22 +106,7 @@ public class FinancialLedgerService {
      */
     public void recordBillReturnWalletCredit(String location, Long customerId, Long walletTxnId, BigDecimal amount,
             LocalDate eventDate) {
-        if (location == null || location.isBlank() || walletTxnId == null || amount == null) {
-            return;
-        }
-        BigDecimal amt = amount.setScale(2, java.math.RoundingMode.HALF_UP);
-        if (amt.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.CASH,
-                LedgerSources.BILL_RETURN_WALLET_CREDIT,
-                walletTxnId,
-                "Bill return → wallet credit customerId=" + customerId);
+        refundAccountingBridge.postBillReturnWalletCredit(location, customerId, walletTxnId, amount, eventDate);
     }
 
     public void recordClientPaymentIn(String location, String clientId, Long clientTransactionId, BillPaymentMode mode,
@@ -148,15 +118,8 @@ public class FinancialLedgerService {
         if (amt.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.CREDIT,
-                LedgerPaymentMode.fromBillPaymentMode(mode),
-                LedgerSources.CLIENT_PAYMENT,
-                clientTransactionId,
-                "Client payment clientId=" + clientId);
+        clientTransactionAccountingBridge.postClientPaymentIn(
+                location, clientId, clientTransactionId, mode, amt, eventDate);
     }
 
     public void recordClientPaymentOut(String location, String clientId, Long clientTransactionId, BillPaymentMode mode,
@@ -168,14 +131,7 @@ public class FinancialLedgerService {
         if (amt.compareTo(BigDecimal.ZERO) <= 0) {
             return;
         }
-        recordTransaction(
-                location.trim(),
-                eventDate != null ? eventDate : LocalDate.now(),
-                amt,
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.fromBillPaymentMode(mode),
-                LedgerSources.CLIENT_OUT,
-                clientTransactionId,
-                "Client payment out clientId=" + clientId);
+        clientTransactionAccountingBridge.postClientPaymentOut(
+                location, clientId, clientTransactionId, mode, amt, eventDate);
     }
 }

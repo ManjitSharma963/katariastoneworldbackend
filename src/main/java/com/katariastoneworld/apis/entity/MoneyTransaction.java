@@ -81,6 +81,16 @@ public class MoneyTransaction {
     @Column(name = "reversal_of_id")
     private Long reversalOfId;
 
+    /** Accounting reversal: FK to {@code transactions.id} row being offset (append-only). */
+    @Column(name = "reverses_transaction_id")
+    private Long reversesTransactionId;
+
+    @Column(name = "request_id", length = 64)
+    private String requestId;
+
+    @Column(name = "void_reason", length = 500)
+    private String voidReason;
+
     @Column(name = "linked_group_id", length = 64)
     private String linkedGroupId;
 

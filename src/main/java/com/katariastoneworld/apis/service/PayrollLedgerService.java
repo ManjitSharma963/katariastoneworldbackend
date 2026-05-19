@@ -6,8 +6,7 @@ import com.katariastoneworld.apis.dto.PayrollSalarySettlementRequestDTO;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
 import com.katariastoneworld.apis.entity.Employee;
 import com.katariastoneworld.apis.entity.LedgerPaymentMode;
-import com.katariastoneworld.apis.entity.LedgerSources;
-import com.katariastoneworld.apis.entity.LedgerTransactionType;
+import com.katariastoneworld.apis.accounting.support.PayrollAccountingBridge;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry;
 import com.katariastoneworld.apis.entity.EmployeePayrollLedgerEntry.EventType;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
@@ -44,7 +43,7 @@ public class PayrollLedgerService {
     private ExpenseRepository expenseRepository;
 
     @Autowired
-    private FinancialLedgerService financialLedgerService;
+    private PayrollAccountingBridge payrollAccountingBridge;
 
     public EmployeePayrollLedgerEntry recordAdvance(Long employeeId, PayrollAdvanceRequestDTO req, String location, Long actorUserId) {
         Employee emp = employeeRepository.findByIdAndLocation(employeeId, location)
@@ -84,14 +83,14 @@ public class PayrollLedgerService {
         ex.setReferenceId(String.valueOf(saved.getId()));
         expenseRepository.save(ex);
 
-        financialLedgerService.recordTransaction(
+        payrollAccountingBridge.postSalaryAdvance(
                 location,
-                d,
-                amt,
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.fromBillPaymentMode(mode),
-                LedgerSources.SALARY_ADVANCE,
                 saved.getId(),
+                emp.getId(),
+                emp.getEmployeeName(),
+                amt,
+                mode,
+                d,
                 "Employee advance: " + emp.getEmployeeName());
         return saved;
     }
@@ -172,14 +171,14 @@ public class PayrollLedgerService {
             ex.setReferenceId(String.valueOf(pay.getId()));
             expenseRepository.save(ex);
 
-            financialLedgerService.recordTransaction(
+            payrollAccountingBridge.postSalaryPayment(
                     location,
-                    d,
-                    desiredCashPaid,
-                    LedgerTransactionType.DEBIT,
-                    LedgerPaymentMode.fromBillPaymentMode(mode),
-                    LedgerSources.SALARY_PAY,
                     pay.getId(),
+                    emp.getId(),
+                    emp.getEmployeeName(),
+                    desiredCashPaid,
+                    mode,
+                    d,
                     "Salary payment: " + emp.getEmployeeName() + " - " + month);
         }
 

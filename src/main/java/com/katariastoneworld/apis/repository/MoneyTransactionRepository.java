@@ -35,6 +35,15 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
             MoneyReferenceType referenceType,
             MoneyCategory category);
 
+    Optional<MoneyTransaction> findByLocationAndRequestId(String location, String requestId);
+
+    List<MoneyTransaction> findByLocationAndReferenceTypeAndReferenceIdAndCategoryAndStatusAndIsDeletedFalse(
+            String location,
+            MoneyReferenceType referenceType,
+            Long referenceId,
+            MoneyCategory category,
+            MoneyTxnStatus status);
+
     boolean existsByReferenceTypeAndReferenceIdAndAmountAndPaymentMode(
             MoneyReferenceType referenceType,
             Long referenceId,
@@ -49,6 +58,10 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
     Optional<MoneyTransaction> findFirstByBillPaymentIdAndIsDeletedFalseOrderByIdAsc(Long billPaymentId);
 
     List<MoneyTransaction> findByBillPaymentIdAndIsDeletedFalseOrderByIdAsc(Long billPaymentId);
+
+    Optional<MoneyTransaction> findFirstByBillPaymentIdAndStatusAndIsDeletedFalseOrderByIdAsc(
+            Long billPaymentId,
+            MoneyTxnStatus status);
 
     List<MoneyTransaction> findByReferenceTypeAndReferenceIdAndCategoryAndIsDeletedFalse(
             MoneyReferenceType referenceType,
@@ -134,6 +147,12 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
             MoneyReferenceType referenceType,
             Long referenceId,
             String txnType);
+
+    Optional<MoneyTransaction> findFirstByReferenceTypeAndReferenceIdAndTxnTypeAndStatusAndIsDeletedFalseOrderByIdAsc(
+            MoneyReferenceType referenceType,
+            Long referenceId,
+            String txnType,
+            MoneyTxnStatus status);
 
     /**
      * Net flow for CASH/UPI bill collections (and reversals) in a range — for reconciliation with {@code bill_payments}.

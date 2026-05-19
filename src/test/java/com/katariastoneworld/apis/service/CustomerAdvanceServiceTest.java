@@ -1,6 +1,8 @@
 package com.katariastoneworld.apis.service;
 
 import com.katariastoneworld.apis.dto.CustomerAdvanceCreateRequestDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundRequestDTO;
+import com.katariastoneworld.apis.dto.CustomerAdvanceRefundResponseDTO;
 import com.katariastoneworld.apis.dto.CustomerAdvanceResponseDTO;
 import com.katariastoneworld.apis.entity.CustomerAdvance;
 import com.katariastoneworld.apis.entity.BillKind;
@@ -102,6 +104,41 @@ class CustomerAdvanceServiceTest {
         verify(customerWalletTransactionRepository).save(any());
         verify(financialLedgerService).recordAdvanceDeposit(
                 eq("Loc"), eq(11L), eq(101L), eq(BillPaymentMode.UPI), any(), any());
+    }
+
+    @Test
+    void refundAdvance_persistsWalletDebitAndLedgerWithPaymentMode() {
+        Customer c = new Customer();
+        c.setId(12L);
+        when(customerRepository.findByIdAndLocation(12L, "Loc")).thenReturn(Optional.of(c));
+        when(customerWalletTransactionRepository.getActiveWalletBalance(
+                eq(12L),
+                eq(CustomerWalletTransaction.Status.ACTIVE),
+                eq(CustomerWalletTransaction.TxnType.CREDIT)))
+                .thenReturn(new BigDecimal("500.00"));
+        when(customerWalletTransactionRepository.save(any())).thenAnswer(inv -> {
+            CustomerWalletTransaction t = inv.getArgument(0);
+            t.setId(202L);
+            return t;
+        });
+
+        CustomerAdvanceRefundRequestDTO dto = new CustomerAdvanceRefundRequestDTO();
+        dto.setCustomerId(12L);
+        dto.setAmount(80.0);
+        dto.setPaymentMode("BANK_TRANSFER");
+        dto.setDescription("token returned");
+
+        CustomerAdvanceRefundResponseDTO resp = service.refundAdvance(dto, "Loc");
+        assertThat(resp.getRefundedAmount()).isEqualTo(80.0);
+        assertThat(resp.getPaymentMode()).isEqualTo("BANK_TRANSFER");
+
+        ArgumentCaptor<CustomerWalletTransaction> cap = ArgumentCaptor.forClass(CustomerWalletTransaction.class);
+        verify(customerWalletTransactionRepository).save(cap.capture());
+        assertThat(cap.getValue().getTxnType()).isEqualTo(CustomerWalletTransaction.TxnType.DEBIT);
+        assertThat(cap.getValue().getSource()).isEqualTo("ADVANCE_REFUND");
+        assertThat(cap.getValue().getPaymentMode()).isEqualTo(BillPaymentMode.BANK_TRANSFER);
+        verify(financialLedgerService).recordAdvanceRefund(
+                eq("Loc"), eq(12L), eq(202L), eq(BillPaymentMode.BANK_TRANSFER), any(), any());
     }
 
     @Test

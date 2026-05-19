@@ -7,7 +7,7 @@ import com.katariastoneworld.apis.dto.DailyBudgetStatusDTO;
 import com.katariastoneworld.apis.dto.DailyBudgetSummaryDTO;
 import com.katariastoneworld.apis.constants.MoneyLedgerCategories;
 import com.katariastoneworld.apis.entity.Expense;
-import com.katariastoneworld.apis.entity.LedgerPaymentMode;
+import com.katariastoneworld.apis.accounting.support.BudgetAccountingBridge;
 import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
 import com.katariastoneworld.apis.entity.MoneyCategory;
@@ -58,7 +58,7 @@ public class DailyBudgetService {
     private MoneyTransactionRepository moneyTransactionRepository;
 
     @Autowired
-    private MoneyTransactionService moneyTransactionService;
+    private BudgetAccountingBridge budgetAccountingBridge;
 
     public List<DailyBudgetSummaryDTO> getAllBudgets() {
         return Collections.emptyList();
@@ -117,21 +117,15 @@ public class DailyBudgetService {
 
         BigDecimal appliedDelta = decreaseAdjustment ? newAmount.negate() : newAmount;
         if (appliedDelta.compareTo(BigDecimal.ZERO) != 0) {
-            moneyTransactionService.syncFromUnified(
-                    loc,
-                    LocalDate.now(),
-                    appliedDelta.abs(),
-                    appliedDelta.signum() > 0 ? LedgerTransactionType.CREDIT : LedgerTransactionType.DEBIT,
-                    bankTransferFunding ? LedgerPaymentMode.BANK : LedgerPaymentMode.CASH,
-                    "BUDGET_ADJUSTMENT",
-                    null,
-                    bankTransferFunding
-                            ? (appliedDelta.signum() > 0
-                                    ? "Manual budget increase via BANK transfer"
-                                    : "Manual budget decrease via BANK transfer")
-                            : (appliedDelta.signum() > 0
-                                    ? "Manual budget increase via CASH/UPI"
-                                    : "Manual budget decrease via CASH/UPI"));
+            String notes = bankTransferFunding
+                    ? (appliedDelta.signum() > 0
+                            ? "Manual budget increase via BANK transfer"
+                            : "Manual budget decrease via BANK transfer")
+                    : (appliedDelta.signum() > 0
+                            ? "Manual budget increase via CASH/UPI"
+                            : "Manual budget decrease via CASH/UPI");
+            budgetAccountingBridge.postBudgetAdjustment(
+                    loc, appliedDelta, bankTransferFunding, LocalDate.now(), notes);
         }
         return getBudgetStatus(loc);
     }

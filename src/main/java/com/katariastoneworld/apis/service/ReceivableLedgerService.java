@@ -6,6 +6,7 @@ import com.katariastoneworld.apis.dto.ReceivableLedgerEntryResponseDTO;
 import com.katariastoneworld.apis.entity.LoanBorrower;
 import com.katariastoneworld.apis.entity.ReceivableLedgerEntry;
 import com.katariastoneworld.apis.entity.ReceivableLedgerEntryType;
+import com.katariastoneworld.apis.accounting.support.ReceivableAccountingBridge;
 import com.katariastoneworld.apis.repository.LoanBorrowerRepository;
 import com.katariastoneworld.apis.repository.ReceivableLedgerEntryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,7 +36,7 @@ public class ReceivableLedgerService {
     private ReceivableLedgerEntryRepository receivableLedgerEntryRepository;
 
     @Autowired
-    private MoneyTransactionService moneyTransactionService;
+    private ReceivableAccountingBridge receivableAccountingBridge;
 
     /**
      * Record principal lent out (cash/UPI/bank/cheque). Unified ledger: DEBIT.
@@ -57,7 +58,7 @@ public class ReceivableLedgerService {
         String mode = normalizePaymentMode(body.getPaymentMode());
         entry.setNotes(composeNotesWithMode(body.getNotes(), mode));
         receivableLedgerEntryRepository.save(entry);
-        moneyTransactionService.recordReceivableDisbursement(entry, borrower, mode);
+        receivableAccountingBridge.postDisbursement(entry, borrower, mode);
     }
 
     /**
@@ -80,7 +81,7 @@ public class ReceivableLedgerService {
         String mode = normalizePaymentMode(body.getPaymentMode());
         entry.setNotes(composeNotesWithMode(body.getNotes(), mode));
         receivableLedgerEntryRepository.save(entry);
-        moneyTransactionService.recordReceivableRepaymentReceived(entry, borrower, mode);
+        receivableAccountingBridge.postRepaymentReceived(entry, borrower, mode);
     }
 
     public List<ReceivableBorrowerSummaryDTO> listBorrowerSummaries(String location) {

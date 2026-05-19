@@ -5,9 +5,8 @@ import com.katariastoneworld.apis.dto.LoanLenderSummaryDTO;
 import com.katariastoneworld.apis.dto.LoanReceiptRequestDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
+import com.katariastoneworld.apis.accounting.support.LoanAccountingBridge;
 import com.katariastoneworld.apis.entity.LedgerPaymentMode;
-import com.katariastoneworld.apis.entity.LedgerSources;
-import com.katariastoneworld.apis.entity.LedgerTransactionType;
 import com.katariastoneworld.apis.entity.LoanLedgerEntry;
 import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
 import com.katariastoneworld.apis.entity.LoanLender;
@@ -38,7 +37,7 @@ public class LoanLedgerService {
     private LoanLedgerEntryRepository loanLedgerEntryRepository;
 
     @Autowired
-    private FinancialLedgerService financialLedgerService;
+    private LoanAccountingBridge loanAccountingBridge;
 
     /** Matches {@link #syncRepaymentLedger} — daily loan-category expenses get LOAN_REPAY, not EXPENSE, in unified ledger. */
     public boolean isSyncedLoanRepaymentExpense(Expense expense) {
@@ -78,14 +77,14 @@ public class LoanLedgerService {
             case "cash" -> LedgerPaymentMode.CASH;
             default -> LedgerPaymentMode.CASH;
         };
-        financialLedgerService.recordTransaction(
+        loanAccountingBridge.postLoanReceived(
                 loc,
-                entry.getEntryDate(),
-                entry.getAmount(),
-                LedgerTransactionType.CREDIT,
-                ledgerPm,
-                LedgerSources.LOAN,
                 entry.getId(),
+                lender.getId(),
+                lender.getDisplayName(),
+                entry.getAmount(),
+                ledgerPm,
+                entry.getEntryDate(),
                 "Loan received lender=" + lender.getDisplayName());
     }
 
@@ -120,12 +119,12 @@ public class LoanLedgerService {
 
         if (!isLoanRepayment) {
             opt.ifPresent(loanLedgerEntryRepository::delete);
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+            loanAccountingBridge.voidLoanRepayment(expense.getLocation(), expense.getId(), "loan repayment removed");
             return;
         }
         if (lenderIdFromRequest == null) {
             opt.ifPresent(loanLedgerEntryRepository::delete);
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+            loanAccountingBridge.voidLoanRepayment(expense.getLocation(), expense.getId(), "loan repayment removed");
             return;
         }
         assertLenderBelongsToLocation(lenderIdFromRequest, expense.getLocation());
@@ -149,7 +148,7 @@ public class LoanLedgerService {
             return;
         }
         loanLedgerEntryRepository.findByExpenseId(expenseId).ifPresent(entry -> {
-            financialLedgerService.removeTransaction(entry.getLocation(), LedgerSources.LOAN_REPAY, expenseId);
+            loanAccountingBridge.voidLoanRepayment(entry.getLocation(), expenseId, "loan repayment removed");
             loanLedgerEntryRepository.delete(entry);
         });
     }
@@ -159,17 +158,11 @@ public class LoanLedgerService {
             return;
         }
         if (expense.getAmount() == null || expense.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
-            financialLedgerService.removeTransaction(expense.getLocation(), LedgerSources.LOAN_REPAY, expense.getId());
+            loanAccountingBridge.voidLoanRepayment(expense.getLocation(), expense.getId(), "loan repayment removed");
             return;
         }
-        financialLedgerService.recordTransaction(
-                expense.getLocation(),
-                expense.getDate() != null ? expense.getDate() : LocalDate.now(),
-                expense.getAmount(),
-                LedgerTransactionType.DEBIT,
-                LedgerPaymentMode.fromLegacyPaymentMethod(expense.getPaymentMethod()),
-                LedgerSources.LOAN_REPAY,
-                expense.getId(),
+        loanAccountingBridge.postLoanRepayment(
+                expense,
                 expense.getDescription() != null ? expense.getDescription() : "Loan repayment");
     }
 

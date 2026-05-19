@@ -1,5 +1,7 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.accounting.support.BillAdjustmentAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.RefundAccountingBridge;
 import com.katariastoneworld.apis.constants.BillAdjustmentSettlementMethod;
 import com.katariastoneworld.apis.constants.BillAdjustmentType;
 import com.katariastoneworld.apis.constants.BillLifecycleStatus;
@@ -37,18 +39,24 @@ public class BillAdjustmentService {
     private final BillInventoryReturnRepository billInventoryReturnRepository;
     private final MoneyTransactionRepository moneyTransactionRepository;
     private final CustomerAdvanceService customerAdvanceService;
+    private final RefundAccountingBridge refundAccountingBridge;
+    private final BillAdjustmentAccountingBridge billAdjustmentAccountingBridge;
 
     public BillAdjustmentService(
             BillService billService,
             BillNonGSTRepository billNonGSTRepository,
             BillInventoryReturnRepository billInventoryReturnRepository,
             MoneyTransactionRepository moneyTransactionRepository,
-            CustomerAdvanceService customerAdvanceService) {
+            CustomerAdvanceService customerAdvanceService,
+            RefundAccountingBridge refundAccountingBridge,
+            BillAdjustmentAccountingBridge billAdjustmentAccountingBridge) {
         this.billService = billService;
         this.billNonGSTRepository = billNonGSTRepository;
         this.billInventoryReturnRepository = billInventoryReturnRepository;
         this.moneyTransactionRepository = moneyTransactionRepository;
         this.customerAdvanceService = customerAdvanceService;
+        this.refundAccountingBridge = refundAccountingBridge;
+        this.billAdjustmentAccountingBridge = billAdjustmentAccountingBridge;
     }
 
     public void assertNonGstBillType(String billType) {
@@ -269,23 +277,21 @@ public class BillAdjustmentService {
             if (amount.compareTo(EPS) <= 0) {
                 amount = diff;
             }
-            String txnType = "ADJ_SETTLE_COLLECT_" + groupId;
-            if (!moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
-                    MoneyReferenceType.bill, parent.getId(), txnType)) {
-                postMoney(
-                        parent,
-                        groupId,
-                        amount,
-                        MoneyDirection.IN,
-                        MoneyCategory.BILL,
-                        MoneyLedgerCategories.SUB_ADJUSTMENT_PAYMENT,
-                        txnType,
-                        mapPaymentMode(request.getPaymentMode()),
-                        request.getTransactionDate(),
-                        request.getReference(),
-                        location,
-                        actorUserId);
-            }
+            Customer customer = parent.getCustomer();
+            String partyName = customer != null && customer.getCustomerName() != null
+                    ? customer.getCustomerName().trim()
+                    : "Customer";
+            billAdjustmentAccountingBridge.postAdjustmentCollect(
+                    parent.getId(),
+                    groupId,
+                    amount,
+                    mapPaymentMode(request.getPaymentMode()),
+                    request.getTransactionDate(),
+                    request.getReference(),
+                    location,
+                    customer != null ? customer.getId() : null,
+                    partyName,
+                    actorUserId);
             return;
         }
 
@@ -296,23 +302,21 @@ public class BillAdjustmentService {
             if (hasStockReturnRefundForGroup(parent.getId(), groupId)) {
                 return;
             }
-            String txnType = "ADJ_SETTLE_REFUND_" + groupId;
-            if (!moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
-                    MoneyReferenceType.bill, parent.getId(), txnType)) {
-                postMoney(
-                        parent,
-                        groupId,
-                        amount,
-                        MoneyDirection.OUT,
-                        MoneyCategory.BILL_RETURN,
-                        MoneyLedgerCategories.SUB_ADJUSTMENT_REFUND,
-                        txnType,
-                        mapPaymentMode(request.getPaymentMode()),
-                        request.getTransactionDate(),
-                        request.getReference(),
-                        location,
-                        actorUserId);
-            }
+            Customer customer = parent.getCustomer();
+            String partyName = customer != null && customer.getCustomerName() != null
+                    ? customer.getCustomerName().trim()
+                    : "Customer";
+            refundAccountingBridge.postAdjustmentRefund(
+                    parent.getId(),
+                    groupId,
+                    amount,
+                    mapPaymentMode(request.getPaymentMode()),
+                    request.getTransactionDate(),
+                    request.getReference(),
+                    location,
+                    customer != null ? customer.getId() : null,
+                    partyName,
+                    actorUserId);
             return;
         }
 
