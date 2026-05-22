@@ -48,6 +48,7 @@ public class BudgetAccountingBridge {
         boolean increase = appliedDelta.signum() > 0;
         MoneyDirection direction = increase ? MoneyDirection.IN : MoneyDirection.OUT;
         String requestId = "BUDGET:ADJ:" + location.trim() + ":" + eventDate + ":" + (increase ? "INC" : "DEC") + ":" + amt;
+        long referenceId = budgetSyntheticReferenceId(requestId);
 
         if (flags.isBudgetEnabled()) {
             PostMoneyCommand command = PostMoneyCommand.builder()
@@ -58,7 +59,7 @@ public class BudgetAccountingBridge {
                     .category(MoneyCategory.OTHER)
                     .subCategory("BUDGET_ADJUSTMENT")
                     .referenceType(MoneyReferenceType.other)
-                    .referenceId(null)
+                    .referenceId(referenceId)
                     .paymentMode(bankTransferFunding ? MoneyPaymentMode.BANK : MoneyPaymentMode.CASH)
                     .requestId(requestId)
                     .ledgerTxnType("BUDGET_ADJUSTMENT")
@@ -82,8 +83,18 @@ public class BudgetAccountingBridge {
                 increase ? LedgerTransactionType.CREDIT : LedgerTransactionType.DEBIT,
                 bankTransferFunding ? LedgerPaymentMode.BANK : LedgerPaymentMode.CASH,
                 "BUDGET_ADJUSTMENT",
-                null,
+                referenceId,
                 notes);
+    }
+
+    /**
+     * Budget adjustments are not tied to a bill/expense row; derive a stable ledger reference from requestId.
+     */
+    static long budgetSyntheticReferenceId(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            return 0L;
+        }
+        return Integer.toUnsignedLong(requestId.trim().hashCode());
     }
 
     public boolean tryVoidByLedgerSource(String location, String source, Long referenceId, String reason) {

@@ -2,6 +2,8 @@ package com.katariastoneworld.apis.entity;
 
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 import lombok.AllArgsConstructor;
@@ -111,12 +113,16 @@ public class Product {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    /** Optional; missing row (e.g. after DB cleanup) is treated as null, not a load error. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "supplier_id")
+    @NotFound(action = NotFoundAction.IGNORE)
     private Supplier supplier;
 
+    /** Optional; missing row is treated as null, not a load error. */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "dealer_id")
+    @NotFound(action = NotFoundAction.IGNORE)
     private Dealer dealer;
 
     @Column(nullable = false, updatable = false)

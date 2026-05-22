@@ -16,7 +16,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findBySlug(String slug);
     boolean existsBySlug(String slug);
     Optional<Product> findByName(String name);
-    List<Product> findByLocation(String location);
+    @Query("SELECT p FROM Product p WHERE TRIM(LOWER(p.location)) = TRIM(LOWER(:location))")
+    List<Product> findByLocation(@Param("location") String location);
     List<Product> findByOwnerUserId(Long ownerUserId);
     Optional<Product> findBySlugAndLocation(String slug, String location);
     Optional<Product> findBySlugAndOwnerUserId(String slug, Long ownerUserId);
