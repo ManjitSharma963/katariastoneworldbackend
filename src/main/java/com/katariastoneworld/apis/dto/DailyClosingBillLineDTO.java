@@ -43,4 +43,13 @@ public class DailyClosingBillLineDTO {
      * {@link #status} remains PAID for backward compatibility.
      */
     private Double overpaidAmount;
+
+    /** Value of goods returned by customer (from return module). 0 if no returns. */
+    private Double returnedAmount;
+
+    /** Effective bill total after deducting returns: {@code totalAmount − returnedAmount}. Same as totalAmount when no returns. */
+    private Double effectiveTotal;
+
+    /** Refund owed to customer when they already paid more than the effective total. */
+    private Double refundDue;
 }

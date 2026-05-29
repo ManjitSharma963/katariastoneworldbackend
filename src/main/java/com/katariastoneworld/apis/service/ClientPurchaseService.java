@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.dto.ClientPurchaseAddAmountRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentResponseDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseRequestDTO;
@@ -92,6 +93,49 @@ public class ClientPurchaseService {
         ClientPurchase clientPurchase = clientPurchaseRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Client purchase not found with id: " + id));
         clientPurchaseRepository.delete(clientPurchase);
+    }
+
+    /**
+     * Increase what you owe on an existing purchase (e.g. bought more from the same client).
+     * Pending = new total − payments already made.
+     */
+    public ClientPurchaseResponseDTO addPurchaseAmount(Long id, ClientPurchaseAddAmountRequestDTO requestDTO, String location) {
+        ClientPurchase clientPurchase = clientPurchaseRepository.findByIdAndLocation(id, location)
+                .orElseThrow(() -> new RuntimeException("Client purchase not found with id: " + id));
+        if (requestDTO == null || requestDTO.getAdditionalAmount() == null) {
+            throw new IllegalArgumentException("Additional amount is required");
+        }
+        BigDecimal add = requestDTO.getAdditionalAmount().setScale(2, RoundingMode.HALF_UP);
+        if (add.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Additional amount must be positive");
+        }
+
+        BigDecimal paid = nullToZero(clientPurchasePaymentRepository.sumAmountForPurchaseId(id))
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal oldTotal = clientPurchase.getTotalAmount() != null
+                ? clientPurchase.getTotalAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal newTotal = oldTotal.add(add).setScale(2, RoundingMode.HALF_UP);
+
+        if (requestDTO.getDescription() != null && !requestDTO.getDescription().isBlank()) {
+            String extra = requestDTO.getDescription().trim();
+            String desc = clientPurchase.getPurchaseDescription();
+            clientPurchase.setPurchaseDescription(
+                    (desc != null && !desc.isBlank() ? desc + " · " : "") + "Additional: " + extra);
+        }
+        if (requestDTO.getPurchaseDate() != null) {
+            clientPurchase.setPurchaseDate(requestDTO.getPurchaseDate());
+        }
+        if (requestDTO.getNotes() != null && !requestDTO.getNotes().isBlank()) {
+            String existing = clientPurchase.getNotes();
+            String noteLine = requestDTO.getNotes().trim();
+            clientPurchase.setNotes(
+                    existing != null && !existing.isBlank() ? existing + "\n" + noteLine : noteLine);
+        }
+        clientPurchase.setTotalAmount(newTotal);
+        ClientPurchase saved = clientPurchaseRepository.save(clientPurchase);
+        recordAdditionalPurchaseCredit(saved, location, add, requestDTO.getDescription());
+        return convertToResponseDTO(saved, paid);
     }
 
     public ClientPurchasePaymentResponseDTO createPayment(Long clientPurchaseId, ClientPurchasePaymentRequestDTO requestDTO,
@@ -203,11 +247,15 @@ public class ClientPurchaseService {
         BigDecimal total = clientPurchase.getTotalAmount() != null
                 ? clientPurchase.getTotalAmount().setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
-        BigDecimal out = total.subtract(paid).setScale(2, RoundingMode.HALF_UP);
-        if (out.compareTo(BigDecimal.ZERO) < 0) {
-            out = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal balance = total.subtract(paid).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal outstanding = balance;
+        BigDecimal overpaid = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        if (balance.compareTo(BigDecimal.ZERO) < 0) {
+            overpaid = balance.negate().setScale(2, RoundingMode.HALF_UP);
+            outstanding = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         }
-        dto.setAmountOutstanding(out);
+        dto.setAmountOutstanding(outstanding);
+        dto.setAmountOverpaid(overpaid);
         return dto;
     }
 
@@ -233,6 +281,24 @@ public class ClientPurchaseService {
             return requestClientId.trim();
         }
         return "";
+    }
+
+    private void recordAdditionalPurchaseCredit(ClientPurchase purchase, String location, BigDecimal delta, String lineDescription) {
+        if (purchase == null || purchase.getClientName() == null || purchase.getClientName().isBlank()
+                || delta == null || delta.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
+        tx.setClientId(purchase.getClientName().trim());
+        tx.setTransactionType("PURCHASE");
+        tx.setAmount(delta);
+        tx.setPaymentMode("CASH");
+        tx.setTransactionDate(purchase.getPurchaseDate() != null ? purchase.getPurchaseDate() : LocalDate.now());
+        String desc = lineDescription != null && !lineDescription.isBlank()
+                ? lineDescription.trim()
+                : (purchase.getPurchaseDescription() != null ? purchase.getPurchaseDescription().trim() : "Additional purchase");
+        tx.setNotes("Additional purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
+        clientTransactionService.create(tx, location, null);
     }
 
     /** Payable entry in client ledger (no cash movement until {@code PAYMENT_OUT}). */

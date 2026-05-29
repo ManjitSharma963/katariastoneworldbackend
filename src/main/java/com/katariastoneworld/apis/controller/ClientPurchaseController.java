@@ -2,6 +2,7 @@ package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
 import com.katariastoneworld.apis.dto.ClientModuleAlertDTO;
+import com.katariastoneworld.apis.dto.ClientPurchaseAddAmountRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchasePaymentResponseDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseRequestDTO;
@@ -145,6 +146,30 @@ public class ClientPurchaseController {
         }
     }
     
+    @Operation(
+            summary = "Add more amount to an existing purchase",
+            description = "Increases total owed on a purchase when you buy more from the same client. "
+                    + "Pending becomes (new total − payments already made). Records an additional PURCHASE ledger entry.")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/{id}/add-amount")
+    @RequiresRole({"user", "admin"})
+    public ResponseEntity<?> addPurchaseAmount(
+            @PathVariable Long id,
+            @Valid @RequestBody ClientPurchaseAddAmountRequestDTO requestDTO,
+            HttpServletRequest request) {
+        try {
+            String location = RequestUtil.getLocationFromRequest(request);
+            ClientPurchaseResponseDTO response = clientPurchaseService.addPurchaseAmount(id, requestDTO, location);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            String msg = e.getMessage() != null ? e.getMessage() : "Add amount failed";
+            if (msg.contains("Client purchase not found")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", msg));
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", msg));
+        }
+    }
+
     @Operation(
             summary = "Create a payment for a client purchase",
             description = "Create a payment transaction for a specific client purchase"

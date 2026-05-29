@@ -20,7 +20,10 @@ public class ClientPurchaseResponseDTO {
     private LocalDate purchaseDate;
     private LocalDate dueDate;
     private BigDecimal amountPaid;
+    /** Amount still owed (zero if overpaid). */
     private BigDecimal amountOutstanding;
+    /** Paid more than total — credit with client on this purchase. */
+    private BigDecimal amountOverpaid;
     private String notes;
     private String location;
     private LocalDateTime createdAt;

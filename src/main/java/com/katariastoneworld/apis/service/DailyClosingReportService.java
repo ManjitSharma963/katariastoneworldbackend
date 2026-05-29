@@ -98,6 +98,9 @@ public class DailyClosingReportService {
     private ClientTransactionRepository clientTransactionRepository;
 
     @Autowired
+    private com.katariastoneworld.apis.repository.BillInventoryReturnLineRepository billInventoryReturnLineRepository;
+
+    @Autowired
     private BalanceSummaryService balanceSummaryService;
 
     private static final List<MoneyPaymentMode> IN_HAND_PAYMENT_MODES = List.of(MoneyPaymentMode.CASH, MoneyPaymentMode.UPI);
@@ -130,6 +133,11 @@ public class DailyClosingReportService {
         Map<Long, List<BillPayment>> nonPaysByBill = loadPaymentsByBillId(BillKind.NON_GST, nonBills.stream().map(BillNonGST::getId).toList());
         Map<String, BigDecimal> advanceUsedByBill = loadAdvanceUsedByBill(gstBills, nonBills);
 
+        Map<Long, BigDecimal> gstReturnValues = loadReturnValuesByBillId(BillKind.GST,
+                gstBills.stream().map(BillGST::getId).toList());
+        Map<Long, BigDecimal> nonReturnValues = loadReturnValuesByBillId(BillKind.NON_GST,
+                nonBills.stream().map(BillNonGST::getId).toList());
+
         List<DailyClosingBillLineDTO> lines = new ArrayList<>();
         BigDecimal grossSales = BigDecimal.ZERO;
         BigDecimal supplementarySales = BigDecimal.ZERO;
@@ -140,7 +148,8 @@ public class DailyClosingReportService {
             List<BillPayment> pays = gstPaysByBill.getOrDefault(b.getId(), List.of());
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
-            lines.add(toLineGst(b, pays, advanceUsed));
+            BigDecimal returnVal = gstReturnValues.getOrDefault(b.getId(), ZERO);
+            lines.add(toLineGst(b, pays, advanceUsed, returnVal));
             BigDecimal billTotal = b.getTotalAmount() != null ? b.getTotalAmount() : ZERO;
             if (Boolean.TRUE.equals(b.getSupplementaryBill())) {
                 supplementarySales = supplementarySales.add(billTotal);
@@ -157,7 +166,8 @@ public class DailyClosingReportService {
             List<BillPayment> pays = nonPaysByBill.getOrDefault(b.getId(), List.of());
             BigDecimal advanceUsed = advanceUsedByBill.getOrDefault(paymentKey(BillKind.NON_GST, b.getId()), ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
-            lines.add(toLineNon(b, pays, advanceUsed));
+            BigDecimal returnVal = nonReturnValues.getOrDefault(b.getId(), ZERO);
+            lines.add(toLineNon(b, pays, advanceUsed, returnVal));
             BigDecimal billTotal = b.getTotalAmount() != null ? b.getTotalAmount() : ZERO;
             if (Boolean.TRUE.equals(b.getSupplementaryBill())) {
                 supplementarySales = supplementarySales.add(billTotal);
@@ -563,25 +573,29 @@ public class DailyClosingReportService {
         return map;
     }
 
-    private static DailyClosingBillLineDTO toLineGst(BillGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
-        BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
+    private static DailyClosingBillLineDTO toLineGst(BillGST b, List<BillPayment> pays, BigDecimal advanceUsed,
+                                                     BigDecimal returnValue) {
+        BigDecimal originalTotal = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal retVal = returnValue != null ? returnValue.setScale(2, RoundingMode.HALF_UP) : ZERO;
+        BigDecimal effTotal = originalTotal.subtract(retVal).max(ZERO).setScale(2, RoundingMode.HALF_UP);
         String statusName = b.getPaymentStatus().name();
         String pm = b.getPaymentMethod();
-        BigDecimal paid = computePaid(total, pays, advanceUsed, pm, statusName);
-        BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal overpaidAmt = paid.subtract(total).max(ZERO);
-        if (overpaidAmt.compareTo(EPS) <= 0) {
-            overpaidAmt = ZERO;
-        }
-        ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
-        String lineStatus = isCancelledGstBill(b) ? "CANCELLED" : deriveLineStatus(total, paid);
+        BigDecimal paid = computePaid(originalTotal, pays, advanceUsed, pm, statusName);
+        BigDecimal effectivePaid = paid.min(effTotal).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal due = effTotal.subtract(paid).max(ZERO).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal refund = paid.subtract(effTotal).max(ZERO).setScale(2, RoundingMode.HALF_UP);
+        if (refund.compareTo(EPS) <= 0) refund = ZERO;
+        BigDecimal overpaidAmt = paid.subtract(originalTotal).max(ZERO);
+        if (overpaidAmt.compareTo(EPS) <= 0) overpaidAmt = ZERO;
+        ModeBuckets buckets = computeModeBuckets(pays, paid, originalTotal, pm, statusName);
+        String lineStatus = isCancelledGstBill(b) ? "CANCELLED" : deriveLineStatus(effTotal, paid);
         return DailyClosingBillLineDTO.builder()
                 .billType("GST")
                 .billId(b.getId())
                 .billNumber(b.getBillNumber())
                 .billDate(b.getBillDate())
-                .totalAmount(total.doubleValue())
-                .paidAmount(paid.doubleValue())
+                .totalAmount(originalTotal.doubleValue())
+                .paidAmount(effectivePaid.doubleValue())
                 .dueAmount(due.doubleValue())
                 .status(lineStatus)
                 .paymentModes(formatModes(pays, pm))
@@ -590,28 +604,35 @@ public class DailyClosingReportService {
                 .bankTransferAmount(scale2(buckets.bank()))
                 .otherAmount(scale2(buckets.other()))
                 .overpaidAmount(scale2(overpaidAmt))
+                .returnedAmount(scale2(retVal))
+                .effectiveTotal(scale2(effTotal))
+                .refundDue(scale2(refund))
                 .build();
     }
 
-    private static DailyClosingBillLineDTO toLineNon(BillNonGST b, List<BillPayment> pays, BigDecimal advanceUsed) {
-        BigDecimal total = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
+    private static DailyClosingBillLineDTO toLineNon(BillNonGST b, List<BillPayment> pays, BigDecimal advanceUsed,
+                                                      BigDecimal returnValue) {
+        BigDecimal originalTotal = b.getTotalAmount().setScale(2, RoundingMode.HALF_UP);
+        BigDecimal retVal = returnValue != null ? returnValue.setScale(2, RoundingMode.HALF_UP) : ZERO;
+        BigDecimal effTotal = originalTotal.subtract(retVal).max(ZERO).setScale(2, RoundingMode.HALF_UP);
         String statusName = b.getPaymentStatus().name();
         String pm = b.getPaymentMethod();
-        BigDecimal paid = computePaid(total, pays, advanceUsed, pm, statusName);
-        BigDecimal due = total.subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal overpaidAmt = paid.subtract(total).max(ZERO);
-        if (overpaidAmt.compareTo(EPS) <= 0) {
-            overpaidAmt = ZERO;
-        }
-        ModeBuckets buckets = computeModeBuckets(pays, paid, total, pm, statusName);
-        String lineStatus = isCancelledNonGstBill(b) ? "CANCELLED" : deriveLineStatus(total, paid);
+        BigDecimal paid = computePaid(originalTotal, pays, advanceUsed, pm, statusName);
+        BigDecimal effectivePaid = paid.min(effTotal).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal due = effTotal.subtract(paid).max(ZERO).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal refund = paid.subtract(effTotal).max(ZERO).setScale(2, RoundingMode.HALF_UP);
+        if (refund.compareTo(EPS) <= 0) refund = ZERO;
+        BigDecimal overpaidAmt = paid.subtract(originalTotal).max(ZERO);
+        if (overpaidAmt.compareTo(EPS) <= 0) overpaidAmt = ZERO;
+        ModeBuckets buckets = computeModeBuckets(pays, paid, originalTotal, pm, statusName);
+        String lineStatus = isCancelledNonGstBill(b) ? "CANCELLED" : deriveLineStatus(effTotal, paid);
         return DailyClosingBillLineDTO.builder()
                 .billType("NON_GST")
                 .billId(b.getId())
                 .billNumber(b.getBillNumber())
                 .billDate(b.getBillDate())
-                .totalAmount(total.doubleValue())
-                .paidAmount(paid.doubleValue())
+                .totalAmount(originalTotal.doubleValue())
+                .paidAmount(effectivePaid.doubleValue())
                 .dueAmount(due.doubleValue())
                 .status(lineStatus)
                 .paymentModes(formatModes(pays, pm))
@@ -620,7 +641,21 @@ public class DailyClosingReportService {
                 .bankTransferAmount(scale2(buckets.bank()))
                 .otherAmount(scale2(buckets.other()))
                 .overpaidAmount(scale2(overpaidAmt))
+                .returnedAmount(scale2(retVal))
+                .effectiveTotal(scale2(effTotal))
+                .refundDue(scale2(refund))
                 .build();
+    }
+
+    private Map<Long, BigDecimal> loadReturnValuesByBillId(BillKind kind, List<Long> billIds) {
+        if (billIds == null || billIds.isEmpty()) return Map.of();
+        Map<Long, BigDecimal> map = new HashMap<>();
+        for (Object[] row : billInventoryReturnLineRepository.sumLineReturnValueGroupedByBillIds(kind, billIds)) {
+            Long billId = ((Number) row[0]).longValue();
+            BigDecimal val = row[1] instanceof BigDecimal bd ? bd : new BigDecimal(row[1].toString());
+            map.put(billId, val.setScale(2, RoundingMode.HALF_UP));
+        }
+        return map;
     }
 
     private static double scale2(BigDecimal v) {
