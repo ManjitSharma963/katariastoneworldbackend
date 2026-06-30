@@ -3,6 +3,7 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionResponseDTO;
 import com.katariastoneworld.apis.entity.BillPaymentMode;
+import com.katariastoneworld.apis.entity.ClientAccountChannel;
 import com.katariastoneworld.apis.entity.ClientTransaction;
 import com.katariastoneworld.apis.entity.ClientTransactionType;
 import com.katariastoneworld.apis.repository.ClientTransactionRepository;
@@ -32,9 +33,11 @@ public class ClientTransactionService {
         BillPaymentMode mode = BillPaymentMode.parseFlexible(req.getPaymentMode());
         LocalDate d = req.getTransactionDate() != null ? req.getTransactionDate() : LocalDate.now();
         BigDecimal amt = req.getAmount();
+        ClientAccountChannel channel = ClientAccountChannel.parseFlexible(req.getAccountChannel());
 
         ClientTransaction tx = new ClientTransaction();
         tx.setClientId(req.getClientId().trim());
+        tx.setAccountChannel(channel);
         tx.setTransactionType(type);
         tx.setAmount(amt);
         tx.setPaymentMode(mode);
@@ -62,18 +65,29 @@ public class ClientTransactionService {
         return rows.stream().map(r -> toDto(r, null)).toList();
     }
 
+    public List<ClientTransactionResponseDTO> runningLedgerForClient(String location, String clientId) {
+        return runningLedgerForClient(location, clientId, null);
+    }
+
     /**
      * Chronological ledger for one client with running balance (signed: IN +, OUT/PURCHASE −).
+     * Optional accountChannel filters to GST or NON_GST rail only.
      */
-    public List<ClientTransactionResponseDTO> runningLedgerForClient(String location, String clientId) {
+    public List<ClientTransactionResponseDTO> runningLedgerForClient(
+            String location, String clientId, String accountChannelRaw) {
         if (location == null || location.isBlank() || clientId == null || clientId.isBlank()) {
             return List.of();
         }
         String loc = location.trim();
         String cid = clientId.trim();
         String keyLower = cid.toLowerCase(java.util.Locale.ROOT);
+        ClientAccountChannel channelFilter = accountChannelRaw != null && !accountChannelRaw.isBlank()
+                ? ClientAccountChannel.parseFlexible(accountChannelRaw)
+                : null;
+
         List<ClientTransaction> rows = clientTransactionRepository.findByLocationOrderByTransactionDateDescIdDesc(loc).stream()
                 .filter(t -> matchesClientKey(t, keyLower))
+                .filter(t -> channelFilter == null || t.getAccountChannel() == channelFilter)
                 .sorted(Comparator
                         .comparing(ClientTransaction::getTransactionDate)
                         .thenComparing(ClientTransaction::getId))
@@ -107,7 +121,6 @@ public class ClientTransactionService {
                     amt,
                     d);
         }
-        // PURCHASE rows are credit/payable only — cash moves on PAYMENT_OUT.
     }
 
     private static boolean matchesClientKey(ClientTransaction row, String keyLower) {
@@ -133,9 +146,11 @@ public class ClientTransactionService {
     }
 
     private ClientTransactionResponseDTO toDto(ClientTransaction row, BigDecimal runningBalanceAfter) {
+        ClientAccountChannel ch = row.getAccountChannel() != null ? row.getAccountChannel() : ClientAccountChannel.NON_GST;
         ClientTransactionResponseDTO dto = ClientTransactionResponseDTO.builder()
                 .id(row.getId())
                 .clientId(row.getClientId())
+                .accountChannel(ch.name())
                 .transactionType(row.getTransactionType() != null ? row.getTransactionType().name() : null)
                 .amount(row.getAmount())
                 .paymentMode(row.getPaymentMode() != null ? row.getPaymentMode().name() : null)
@@ -148,4 +163,3 @@ public class ClientTransactionService {
         return dto;
     }
 }
-

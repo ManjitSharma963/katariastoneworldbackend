@@ -17,6 +17,7 @@ public class LoanLedgerEntryResponseDTO {
     private BigDecimal amount;
     private LocalDate entryDate;
     private String notes;
+    private String paymentMode;
     private Long expenseId;
     private LocalDateTime createdAt;
 }

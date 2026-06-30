@@ -151,6 +151,25 @@ public class BillNonGST {
 
     @Column(name = "cancellation_reason", columnDefinition = "TEXT")
     private String cancellationReason;
+
+    /** Sales agent commission (optional). */
+    @Column(name = "agent_id")
+    private Long agentId;
+
+    @Column(name = "agent_commission_type", length = 20)
+    private String agentCommissionType;
+
+    @Column(name = "agent_commission_value", precision = 10, scale = 2)
+    private BigDecimal agentCommissionValue;
+
+    @Column(name = "agent_commission_amount", precision = 12, scale = 2)
+    private BigDecimal agentCommissionAmount;
+
+    @Column(name = "agent_commission_status", length = 20)
+    private String agentCommissionStatus;
+
+    @Column(name = "agent_commission_notes", columnDefinition = "TEXT")
+    private String agentCommissionNotes;
     
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemNonGST> items = new ArrayList<>();

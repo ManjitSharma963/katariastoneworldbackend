@@ -31,6 +31,10 @@ public class ClientPurchasePayment {
     @NotBlank(message = "Client ID is required")
     @Column(name = "client_id", nullable = false, length = 200)
     private String clientId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_channel", nullable = false, length = 16)
+    private ClientAccountChannel accountChannel = ClientAccountChannel.NON_GST;
     
     @NotNull(message = "Amount is required")
     @Positive(message = "Amount must be positive")
@@ -56,6 +60,9 @@ public class ClientPurchasePayment {
     
     @PrePersist
     protected void onCreate() {
+        if (accountChannel == null) {
+            accountChannel = ClientAccountChannel.NON_GST;
+        }
         if (paymentDate == null) {
             paymentDate = LocalDate.now();
         }

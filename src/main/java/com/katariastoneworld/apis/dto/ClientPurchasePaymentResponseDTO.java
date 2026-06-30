@@ -16,6 +16,8 @@ public class ClientPurchasePaymentResponseDTO {
     private Long id;
     private Long clientPurchaseId;
     private String clientId;
+    private String clientName;
+    private String accountChannel;
     private BigDecimal amount;
     private LocalDate date;
     private String paymentMethod;

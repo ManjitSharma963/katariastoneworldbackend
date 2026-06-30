@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ExpenseRepository extends JpaRepository<Expense, Long> {
@@ -18,5 +19,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, Long> {
     List<Expense> findByLocationAndTypeAndDate(String location, String type, LocalDate date);
     List<Expense> findByUserIdOrderByDateDesc(Long userId);
     List<Expense> findByUserIdAndDate(Long userId, LocalDate date);
+
+    Optional<Expense> findFirstByLocationAndReferenceIdAndIsDeletedFalse(String location, String referenceId);
 }
 

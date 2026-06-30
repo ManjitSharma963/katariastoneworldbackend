@@ -1,8 +1,10 @@
 package com.katariastoneworld.apis.controller;
 
 import com.katariastoneworld.apis.config.RequiresRole;
+import com.katariastoneworld.apis.dto.ClientAccountSummaryDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionResponseDTO;
+import com.katariastoneworld.apis.service.ClientAccountSummaryService;
 import com.katariastoneworld.apis.service.ClientTransactionService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,6 +23,9 @@ public class ClientTransactionController {
 
     @Autowired
     private ClientTransactionService clientTransactionService;
+
+    @Autowired
+    private ClientAccountSummaryService clientAccountSummaryService;
 
     @PostMapping(consumes = "application/json")
     @RequiresRole({"user", "admin"})
@@ -51,9 +56,20 @@ public class ClientTransactionController {
     @RequiresRole("admin")
     public ResponseEntity<List<ClientTransactionResponseDTO>> runningLedger(
             @RequestParam("clientId") String clientId,
+            @RequestParam(value = "accountChannel", required = false) String accountChannel,
             HttpServletRequest request) {
         String location = RequestUtil.getLocationFromRequest(request);
-        return ResponseEntity.ok(clientTransactionService.runningLedgerForClient(location, clientId));
+        return ResponseEntity.ok(clientTransactionService.runningLedgerForClient(location, clientId, accountChannel));
+    }
+
+    /** GST / Non-GST / combined totals for one client. */
+    @GetMapping("/client-summary")
+    @RequiresRole("admin")
+    public ResponseEntity<ClientAccountSummaryDTO> clientSummary(
+            @RequestParam("clientId") String clientId,
+            HttpServletRequest request) {
+        String location = RequestUtil.getLocationFromRequest(request);
+        return ResponseEntity.ok(clientAccountSummaryService.summarize(location, clientId));
     }
 }
 

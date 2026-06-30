@@ -10,14 +10,14 @@ CREATE TABLE IF NOT EXISTS employee_payroll_ledger (
     amount DECIMAL(14,2) NOT NULL,
     payment_mode VARCHAR(32) NULL COMMENT 'CASH, UPI, BANK_TRANSFER, CHEQUE, OTHER',
     event_date DATE NOT NULL,
-    month VARCHAR(7) NOT NULL COMMENT 'YYYY-MM derived from event_date',
+    salary_month VARCHAR(7) NOT NULL COMMENT 'YYYY-MM derived from event_date',
     notes VARCHAR(512) NULL,
     created_by BIGINT NULL,
     updated_by BIGINT NULL,
     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
     created_at DATETIME(6) NOT NULL,
     updated_at DATETIME(6) NULL,
-    INDEX idx_emp_payroll_emp_month (employee_id, month),
+    INDEX idx_emp_payroll_emp_month (employee_id, salary_month),
     INDEX idx_emp_payroll_loc_date (location, event_date),
     INDEX idx_emp_payroll_emp_date (employee_id, event_date)
 );

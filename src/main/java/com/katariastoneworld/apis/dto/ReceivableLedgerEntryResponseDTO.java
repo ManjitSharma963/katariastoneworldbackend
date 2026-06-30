@@ -17,5 +17,6 @@ public class ReceivableLedgerEntryResponseDTO {
     private BigDecimal amount;
     private LocalDate entryDate;
     private String notes;
+    private String paymentMode;
     private LocalDateTime createdAt;
 }

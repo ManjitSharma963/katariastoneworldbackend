@@ -150,6 +150,25 @@ public class BillGST {
 
     @Column(name = "supplementary_reason", length = 500)
     private String supplementaryReason;
+
+    /** Sales agent commission (optional). */
+    @Column(name = "agent_id")
+    private Long agentId;
+
+    @Column(name = "agent_commission_type", length = 20)
+    private String agentCommissionType;
+
+    @Column(name = "agent_commission_value", precision = 10, scale = 2)
+    private BigDecimal agentCommissionValue;
+
+    @Column(name = "agent_commission_amount", precision = 12, scale = 2)
+    private BigDecimal agentCommissionAmount;
+
+    @Column(name = "agent_commission_status", length = 20)
+    private String agentCommissionStatus;
+
+    @Column(name = "agent_commission_notes", columnDefinition = "TEXT")
+    private String agentCommissionNotes;
     
     @OneToMany(mappedBy = "bill", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     private List<BillItemGST> items = new ArrayList<>();

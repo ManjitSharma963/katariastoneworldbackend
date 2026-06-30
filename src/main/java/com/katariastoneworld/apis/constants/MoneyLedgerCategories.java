@@ -19,6 +19,8 @@ public final class MoneyLedgerCategories {
     public static final String SUB_ADVANCE_RESTORE = "ADVANCE_RESTORE";
     /** Bill settlement from customer wallet — liability release, not new cash/UPI receipt. See {@link com.katariastoneworld.apis.service.BillService#createTransactionFromBillPayment}. */
     public static final String SUB_ADVANCE_APPLICATION = "ADVANCE_APPLICATION";
+    /** Internal cash ↔ bank movement — excluded from expense / daily-budget operating flows. */
+    public static final String SUB_CASH_BANK_TRANSFER = "CASH_BANK_TRANSFER";
 
     public static final List<MoneyCategory> NON_EXPENSE_OUT = List.of(
             MoneyCategory.BILL_REVERSAL,

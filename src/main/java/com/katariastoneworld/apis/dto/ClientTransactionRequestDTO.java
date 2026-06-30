@@ -25,5 +25,7 @@ public class ClientTransactionRequestDTO {
 
     private LocalDate transactionDate;
     private String notes;
+    /** GST or NON_GST */
+    private String accountChannel;
 }
 

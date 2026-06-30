@@ -90,7 +90,34 @@ class BillPaymentAccountingEngineTest {
         verify(moneyTransactionRepository, never()).delete(any());
     }
 
+    @Test
+    void postIn_afterVoidedBillPayment_reactivatesRowWithUpdatedFields() {
+        MoneyTransaction cancelled = new MoneyTransaction();
+        cancelled.setId(5L);
+        cancelled.setBillPaymentId(42L);
+        cancelled.setStatus(MoneyTxnStatus.CANCELLED);
+        cancelled.setIsDeleted(false);
+        cancelled.setPaymentMode(MoneyPaymentMode.CASH);
+        cancelled.setAmount(new BigDecimal("5000.00"));
+        when(moneyTransactionRepository.findByLocationAndRequestId("Bhondsi", "BILL_PAYMENT:IN:42"))
+                .thenReturn(Optional.of(cancelled));
+        when(moneyTransactionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        var result = service.postIn(billPaymentIn(42L, MoneyPaymentMode.UPI));
+
+        assertThat(result.idempotentReplay()).isFalse();
+        ArgumentCaptor<MoneyTransaction> captor = ArgumentCaptor.forClass(MoneyTransaction.class);
+        verify(moneyTransactionRepository).save(captor.capture());
+        MoneyTransaction saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(MoneyTxnStatus.ACTIVE);
+        assertThat(saved.getPaymentMode()).isEqualTo(MoneyPaymentMode.UPI);
+    }
+
     private static PostMoneyCommand billPaymentIn(Long billPaymentId) {
+        return billPaymentIn(billPaymentId, MoneyPaymentMode.CASH);
+    }
+
+    private static PostMoneyCommand billPaymentIn(Long billPaymentId, MoneyPaymentMode paymentMode) {
         return PostMoneyCommand.builder()
                 .location("Bhondsi")
                 .transactionDate(LocalDate.of(2026, 5, 18))
@@ -100,7 +127,7 @@ class BillPaymentAccountingEngineTest {
                 .subCategory("BILL_PAYMENT")
                 .referenceType(MoneyReferenceType.bill)
                 .referenceId(900L)
-                .paymentMode(MoneyPaymentMode.CASH)
+                .paymentMode(paymentMode)
                 .partyName("Test Customer")
                 .requestId("BILL_PAYMENT:IN:" + billPaymentId)
                 .billPaymentId(billPaymentId)

@@ -25,6 +25,8 @@ public class BillResponseDTO {
     private String gstin;
     private String customerEmail;
     private LocalDate billDate;
+    /** Line-item count for list views when {@link #items} is omitted for performance. */
+    private Integer itemsCount;
     private List<BillItemDTO> items;
     private Double totalSqft;
     private Double subtotal;
@@ -101,4 +103,14 @@ public class BillResponseDTO {
 
     /** Recent lifecycle audit events (newest first). */
     private List<BillEventResponseDTO> billEvents = new ArrayList<>();
+
+    /** Sales agent commission (when deal was through an agent). */
+    private Boolean dealThroughAgent;
+    private Long agentId;
+    private String agentName;
+    private String agentCommissionType;
+    private Double agentCommissionValue;
+    private Double agentCommissionAmount;
+    private String agentCommissionStatus;
+    private String agentCommissionNotes;
 }

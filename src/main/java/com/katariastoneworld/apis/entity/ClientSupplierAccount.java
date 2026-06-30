@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  */
 @Entity
 @Table(name = "client_supplier_accounts", uniqueConstraints = {
-        @UniqueConstraint(name = "uk_client_supplier_loc_key", columnNames = { "location", "client_key" })
+        @UniqueConstraint(name = "uk_client_supplier_loc_key_channel", columnNames = { "location", "client_key", "account_channel" })
 }, indexes = {
         @Index(name = "idx_client_supplier_loc", columnList = "location")
 })
@@ -32,6 +32,10 @@ public class ClientSupplierAccount {
     /** Normalized key (e.g. lower(trim(clientName))) for stable matching. */
     @Column(name = "client_key", nullable = false, length = 256)
     private String clientKey;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_channel", nullable = false, length = 16)
+    private ClientAccountChannel accountChannel = ClientAccountChannel.NON_GST;
 
     @Column(name = "display_name", length = 200)
     private String displayName;
@@ -52,6 +56,9 @@ public class ClientSupplierAccount {
 
     @PrePersist
     protected void onCreate() {
+        if (accountChannel == null) {
+            accountChannel = ClientAccountChannel.NON_GST;
+        }
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }

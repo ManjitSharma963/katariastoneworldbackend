@@ -28,7 +28,15 @@ class AccountingTransactionWriter {
         if (command.requestId() != null && !command.requestId().isBlank()) {
             var byRequest = moneyTransactionRepository.findByLocationAndRequestId(location, command.requestId().trim());
             if (byRequest.isPresent()) {
-                return PostedTransactionResult.from(byRequest.get(), true);
+                MoneyTransaction existing = byRequest.get();
+                if (existing.getStatus() == MoneyTxnStatus.ACTIVE && !Boolean.TRUE.equals(existing.getIsDeleted())) {
+                    return PostedTransactionResult.from(existing, true);
+                }
+                apply(command, location, existing);
+                existing.setStatus(MoneyTxnStatus.ACTIVE);
+                existing.setIsDeleted(false);
+                existing.setVoidReason(null);
+                return PostedTransactionResult.from(moneyTransactionRepository.save(existing), false);
             }
         }
 

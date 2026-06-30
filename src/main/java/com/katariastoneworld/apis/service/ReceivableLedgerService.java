@@ -1,5 +1,6 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.dto.LoanTransactionEditRequestDTO;
 import com.katariastoneworld.apis.dto.ReceivableBorrowerSummaryDTO;
 import com.katariastoneworld.apis.dto.ReceivableLendRequestDTO;
 import com.katariastoneworld.apis.dto.ReceivableLedgerEntryResponseDTO;
@@ -9,6 +10,7 @@ import com.katariastoneworld.apis.entity.ReceivableLedgerEntryType;
 import com.katariastoneworld.apis.accounting.support.ReceivableAccountingBridge;
 import com.katariastoneworld.apis.repository.LoanBorrowerRepository;
 import com.katariastoneworld.apis.repository.ReceivableLedgerEntryRepository;
+import com.katariastoneworld.apis.util.LoanEditWindow;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -126,6 +128,77 @@ public class ReceivableLedgerService {
                 .collect(Collectors.toList());
     }
 
+    public ReceivableLedgerEntryResponseDTO updateEntry(String location, Long entryId, LoanTransactionEditRequestDTO body) {
+        ReceivableLedgerEntry entry = loadOwnedBorrowerEntry(location, entryId);
+        LoanEditWindow.assertEditable(entry.getEntryDate(), entry.getCreatedAt());
+        String ledgerTxnType = ledgerTxnTypeFor(entry);
+        receivableAccountingBridge.voidReceivableEntry(entry.getLocation(), entry.getId(), ledgerTxnType, "loan entry edited");
+        applyEdit(entry, body);
+        receivableLedgerEntryRepository.save(entry);
+        LoanBorrower borrower = loanBorrowerRepository.findById(entry.getBorrowerId())
+                .orElseThrow(() -> new IllegalArgumentException("Borrower not found: " + entry.getBorrowerId()));
+        String mode = normalizePaymentMode(parsePaymentModeFromNotes(entry.getNotes()));
+        if (entry.getEntryType() == ReceivableLedgerEntryType.DISBURSEMENT) {
+            receivableAccountingBridge.postDisbursement(entry, borrower, mode);
+        } else if (entry.getEntryType() == ReceivableLedgerEntryType.REPAYMENT_RECEIVED) {
+            receivableAccountingBridge.postRepaymentReceived(entry, borrower, mode);
+        } else {
+            throw new IllegalArgumentException("Unsupported borrower entry type: " + entry.getEntryType());
+        }
+        return toEntryDto(entry);
+    }
+
+    public void deleteEntry(String location, Long entryId) {
+        ReceivableLedgerEntry entry = loadOwnedBorrowerEntry(location, entryId);
+        LoanEditWindow.assertEditable(entry.getEntryDate(), entry.getCreatedAt());
+        receivableAccountingBridge.voidReceivableEntry(
+                entry.getLocation(), entry.getId(), ledgerTxnTypeFor(entry), "loan entry deleted");
+        receivableLedgerEntryRepository.delete(entry);
+    }
+
+    private ReceivableLedgerEntry loadOwnedBorrowerEntry(String location, Long entryId) {
+        if (entryId == null) {
+            throw new IllegalArgumentException("Entry id is required");
+        }
+        String loc = normalizeLocation(location);
+        ReceivableLedgerEntry entry = receivableLedgerEntryRepository.findById(entryId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan entry not found: " + entryId));
+        if (!loc.equalsIgnoreCase(normalizeLocation(entry.getLocation()))) {
+            throw new IllegalArgumentException("Loan entry not found for your location.");
+        }
+        return entry;
+    }
+
+    private static String ledgerTxnTypeFor(ReceivableLedgerEntry entry) {
+        if (entry.getEntryType() == ReceivableLedgerEntryType.DISBURSEMENT) {
+            return "LOAN_GIVEN";
+        }
+        if (entry.getEntryType() == ReceivableLedgerEntryType.REPAYMENT_RECEIVED) {
+            return "LOAN_GIVEN_REPAY";
+        }
+        throw new IllegalArgumentException("Unsupported borrower entry type: " + entry.getEntryType());
+    }
+
+    private void applyEdit(ReceivableLedgerEntry entry, LoanTransactionEditRequestDTO body) {
+        entry.setAmount(body.getAmount().setScale(2, RoundingMode.HALF_UP));
+        if (body.getEntryDate() != null) {
+            entry.setEntryDate(body.getEntryDate());
+        }
+        String mode = normalizePaymentMode(body.getPaymentMode() != null
+                ? body.getPaymentMode()
+                : parsePaymentModeFromNotes(entry.getNotes()));
+        entry.setNotes(composeNotesWithMode(
+                body.getNotes() != null ? body.getNotes() : stripModeFromNotes(entry.getNotes()), mode));
+    }
+
+    private static String parsePaymentModeFromNotes(String notes) {
+        return LoanLedgerService.parsePaymentModeFromNotes(notes);
+    }
+
+    private static String stripModeFromNotes(String notes) {
+        return LoanLedgerService.stripModeFromNotes(notes);
+    }
+
     private ReceivableLedgerEntryResponseDTO toEntryDto(ReceivableLedgerEntry e) {
         ReceivableLedgerEntryResponseDTO dto = new ReceivableLedgerEntryResponseDTO();
         dto.setId(e.getId());
@@ -133,6 +206,7 @@ public class ReceivableLedgerService {
         dto.setAmount(e.getAmount());
         dto.setEntryDate(e.getEntryDate());
         dto.setNotes(e.getNotes());
+        dto.setPaymentMode(parsePaymentModeFromNotes(e.getNotes()));
         dto.setCreatedAt(e.getCreatedAt());
         return dto;
     }

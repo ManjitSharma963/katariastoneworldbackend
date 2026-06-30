@@ -15,6 +15,7 @@ public class ClientPurchaseResponseDTO {
     
     private Long id;
     private String clientName;
+    private String accountChannel;
     private String purchaseDescription;
     private BigDecimal totalAmount;
     private LocalDate purchaseDate;

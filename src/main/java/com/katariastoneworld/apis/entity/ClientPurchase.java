@@ -25,6 +25,10 @@ public class ClientPurchase {
     @NotBlank(message = "Client name is required")
     @Column(nullable = false, length = 200)
     private String clientName;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_channel", nullable = false, length = 16)
+    private ClientAccountChannel accountChannel = ClientAccountChannel.NON_GST;
     
     @NotBlank(message = "Purchase description is required")
     @Column(nullable = false, columnDefinition = "TEXT")
@@ -60,6 +64,9 @@ public class ClientPurchase {
     
     @PrePersist
     protected void onCreate() {
+        if (accountChannel == null) {
+            accountChannel = ClientAccountChannel.NON_GST;
+        }
         if (createdAt == null) {
             createdAt = LocalDateTime.now();
         }

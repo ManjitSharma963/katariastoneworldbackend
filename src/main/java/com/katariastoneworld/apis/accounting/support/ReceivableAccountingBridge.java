@@ -8,6 +8,7 @@ import com.katariastoneworld.apis.entity.MoneyCategory;
 import com.katariastoneworld.apis.entity.MoneyDirection;
 import com.katariastoneworld.apis.entity.MoneyPaymentMode;
 import com.katariastoneworld.apis.entity.MoneyReferenceType;
+import com.katariastoneworld.apis.entity.MoneyTxnStatus;
 import com.katariastoneworld.apis.entity.ReceivableLedgerEntry;
 import com.katariastoneworld.apis.repository.MoneyTransactionRepository;
 import com.katariastoneworld.apis.service.MoneyTransactionLegacySync;
@@ -43,8 +44,8 @@ public class ReceivableAccountingBridge {
             return;
         }
         if (flags.isReceivableEnabled()) {
-            if (moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
-                    MoneyReferenceType.loan, entry.getId(), "LOAN_GIVEN")) {
+            if (moneyTransactionRepository.findFirstByReferenceTypeAndReferenceIdAndTxnTypeAndStatusAndIsDeletedFalseOrderByIdAsc(
+                    MoneyReferenceType.loan, entry.getId(), "LOAN_GIVEN", MoneyTxnStatus.ACTIVE).isPresent()) {
                 return;
             }
             PostMoneyCommand command = PostMoneyCommand.builder()
@@ -77,8 +78,8 @@ public class ReceivableAccountingBridge {
             return;
         }
         if (flags.isReceivableEnabled()) {
-            if (moneyTransactionRepository.existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
-                    MoneyReferenceType.loan, entry.getId(), "LOAN_GIVEN_REPAY")) {
+            if (moneyTransactionRepository.findFirstByReferenceTypeAndReferenceIdAndTxnTypeAndStatusAndIsDeletedFalseOrderByIdAsc(
+                    MoneyReferenceType.loan, entry.getId(), "LOAN_GIVEN_REPAY", MoneyTxnStatus.ACTIVE).isPresent()) {
                 return;
             }
             PostMoneyCommand command = PostMoneyCommand.builder()
@@ -118,16 +119,20 @@ public class ReceivableAccountingBridge {
     }
 
     public void voidReceivableEntry(String location, Long receivableEntryId, String ledgerTxnType, String reason) {
-        if (!flags.isReceivableEnabled() || receivableEntryId == null) {
+        if (receivableEntryId == null) {
             return;
         }
-        if ("LOAN_GIVEN".equals(ledgerTxnType)) {
-            posting.voidByRequestId(location, "RECEIVABLE:DISBURSE:" + receivableEntryId, reason, MODULE);
-        } else if ("LOAN_GIVEN_REPAY".equals(ledgerTxnType)) {
-            posting.voidByRequestId(location, "RECEIVABLE:REPAY:" + receivableEntryId, reason, MODULE);
+        if (flags.isReceivableEnabled()) {
+            if ("LOAN_GIVEN".equals(ledgerTxnType)) {
+                posting.voidByRequestId(location, "RECEIVABLE:DISBURSE:" + receivableEntryId, reason, MODULE);
+            } else if ("LOAN_GIVEN_REPAY".equals(ledgerTxnType)) {
+                posting.voidByRequestId(location, "RECEIVABLE:REPAY:" + receivableEntryId, reason, MODULE);
+            }
+            posting.voidByReference(
+                    location, MoneyReferenceType.loan, receivableEntryId, MoneyCategory.LOAN, ledgerTxnType, reason, MODULE);
+            return;
         }
-        posting.voidByReference(
-                location, MoneyReferenceType.loan, receivableEntryId, MoneyCategory.LOAN, ledgerTxnType, reason, MODULE);
+        legacySync.hardDeleteSyncedLine(ledgerTxnType, receivableEntryId);
     }
 
     private static String resolveBorrowerName(LoanBorrower borrower) {

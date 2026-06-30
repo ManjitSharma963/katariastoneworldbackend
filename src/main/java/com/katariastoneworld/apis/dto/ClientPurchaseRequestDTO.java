@@ -32,6 +32,9 @@ public class ClientPurchaseRequestDTO {
     private LocalDate dueDate;
     
     private String notes;
+
+    /** GST or NON_GST — which payable account this purchase belongs to. */
+    private String accountChannel;
     
     // Location will be set from JWT token, not from request
 }

@@ -19,6 +19,8 @@ public class ClientTransactionResponseDTO {
     private String notes;
     private String location;
     private LocalDateTime createdAt;
+    /** GST or NON_GST */
+    private String accountChannel;
     /** Set only on running-ledger endpoint: cumulative signed balance after this row. */
     private BigDecimal runningBalanceAfter;
 }

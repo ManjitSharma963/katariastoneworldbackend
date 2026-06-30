@@ -20,4 +20,7 @@ public class BillPaymentRequestDTO {
     private String paymentMode;
 
     private LocalDate paymentDate;
+
+    /** When true, records payment then closes bill as PAID (remaining balance written off). */
+    private Boolean settleBill;
 }

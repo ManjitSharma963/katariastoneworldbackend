@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "employee_payroll_ledger", indexes = {
-        @Index(name = "idx_emp_payroll_emp_month", columnList = "employee_id,month"),
+    @Index(name = "idx_emp_payroll_emp_month", columnList = "employee_id,salary_month"),
         @Index(name = "idx_emp_payroll_loc_date", columnList = "location,event_date"),
         @Index(name = "idx_emp_payroll_emp_date", columnList = "employee_id,event_date")
 })
@@ -63,7 +63,7 @@ public class EmployeePayrollLedgerEntry {
 
     /** YYYY-MM derived from eventDate. */
     @NotNull
-    @Column(name = "month", nullable = false, length = 7)
+    @Column(name = "salary_month", nullable = false, length = 7)
     private String month;
 
     @Column(name = "notes", length = 512)

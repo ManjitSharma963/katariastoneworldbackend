@@ -3,6 +3,7 @@ package com.katariastoneworld.apis.service;
 import com.katariastoneworld.apis.dto.ClientSupplierAccountRequestDTO;
 import com.katariastoneworld.apis.dto.ClientSupplierAccountResponseDTO;
 import com.katariastoneworld.apis.dto.ClientSupplierAccountUpdateDTO;
+import com.katariastoneworld.apis.entity.ClientAccountChannel;
 import com.katariastoneworld.apis.entity.ClientSupplierAccount;
 import com.katariastoneworld.apis.repository.ClientSupplierAccountRepository;
 import com.katariastoneworld.apis.util.ClientSupplierKeys;
@@ -38,12 +39,15 @@ public class ClientSupplierAccountService {
         if (key.isEmpty()) {
             throw new RuntimeException("Client name is required.");
         }
-        if (clientSupplierAccountRepository.findByLocationAndClientKey(loc, key).isPresent()) {
-            throw new RuntimeException("An account already exists for this client/supplier name at this location.");
+        ClientAccountChannel channel = ClientAccountChannel.parseFlexible(dto.getAccountChannel());
+        if (clientSupplierAccountRepository.findByLocationAndClientKeyAndAccountChannel(loc, key, channel).isPresent()) {
+            throw new RuntimeException("An account already exists for this client/supplier ("
+                    + channel.displayLabel() + ") at this location.");
         }
         ClientSupplierAccount row = new ClientSupplierAccount();
         row.setLocation(loc);
         row.setClientKey(key);
+        row.setAccountChannel(channel);
         String disp = dto.getDisplayName();
         row.setDisplayName(disp != null && !disp.isBlank() ? disp.trim() : dto.getClientName().trim());
         row.setCreditLimit(dto.getCreditLimit());
@@ -77,6 +81,7 @@ public class ClientSupplierAccountService {
                 row.getLocation(),
                 row.getClientKey(),
                 row.getDisplayName(),
+                row.getAccountChannel() != null ? row.getAccountChannel().name() : ClientAccountChannel.NON_GST.name(),
                 row.getCreditLimit(),
                 row.getPaymentTermsDays(),
                 row.getCreatedAt(),

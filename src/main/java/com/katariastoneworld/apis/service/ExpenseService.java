@@ -159,6 +159,49 @@ public class ExpenseService {
         expenseRepository.save(expense);
     }
 
+    public ExpenseResponseDTO createAgentCommissionExpenseIfAbsent(
+            String location,
+            String referenceKey,
+            String agentName,
+            String billNumber,
+            BigDecimal amount,
+            LocalDate expenseDate,
+            String commissionNotes) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Commission amount must be positive to post expense");
+        }
+        return expenseRepository
+                .findFirstByLocationAndReferenceIdAndIsDeletedFalse(location, referenceKey)
+                .map(this::convertToResponseDTO)
+                .orElseGet(() -> {
+                    ExpenseRequestDTO dto = new ExpenseRequestDTO();
+                    dto.setType("daily");
+                    dto.setCategory("agent commission");
+                    dto.setAmount(amount.setScale(2, java.math.RoundingMode.HALF_UP));
+                    dto.setDate(expenseDate != null ? expenseDate : LocalDate.now());
+                    dto.setPaymentMethod("cash");
+                    StringBuilder desc = new StringBuilder();
+                    desc.append("Agent commission — ").append(agentName != null ? agentName : "Agent");
+                    if (billNumber != null && !billNumber.isBlank()) {
+                        desc.append(" — Bill #").append(billNumber.trim());
+                    }
+                    if (commissionNotes != null && !commissionNotes.isBlank()) {
+                        desc.append(" — ").append(commissionNotes.trim());
+                    }
+                    dto.setDescription(desc.toString());
+                    dto.setExpenseCategory("MISC");
+                    dto.setReferenceType("DIRECT");
+                    dto.setReferenceId(referenceKey);
+                    return createExpense(dto, location);
+                });
+    }
+
+    public java.util.Optional<ExpenseResponseDTO> findAgentCommissionExpense(String location, String referenceKey) {
+        return expenseRepository
+                .findFirstByLocationAndReferenceIdAndIsDeletedFalse(location, referenceKey)
+                .map(this::convertToResponseDTO);
+    }
+
     /**
      * Payroll-mirrored expenses use SALARY_* only; synced loan repayments use LOAN_REPAY from {@link LoanLedgerService}.
      */

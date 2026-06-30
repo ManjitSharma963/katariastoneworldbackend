@@ -6,8 +6,10 @@ import com.katariastoneworld.apis.dto.ClientPurchasePaymentResponseDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseRequestDTO;
 import com.katariastoneworld.apis.dto.ClientPurchaseResponseDTO;
 import com.katariastoneworld.apis.dto.ClientTransactionRequestDTO;
+import com.katariastoneworld.apis.entity.ClientAccountChannel;
 import com.katariastoneworld.apis.entity.ClientPurchase;
 import com.katariastoneworld.apis.entity.ClientPurchasePayment;
+import com.katariastoneworld.apis.entity.ClientSupplierAccount;
 import com.katariastoneworld.apis.repository.ClientPurchasePaymentRepository;
 import com.katariastoneworld.apis.repository.ClientPurchaseRepository;
 import com.katariastoneworld.apis.repository.ClientSupplierAccountRepository;
@@ -41,15 +43,18 @@ public class ClientPurchaseService {
     private ClientSupplierAccountRepository clientSupplierAccountRepository;
 
     public ClientPurchaseResponseDTO createClientPurchase(ClientPurchaseRequestDTO requestDTO, String location) {
+        ClientAccountChannel channel = ClientAccountChannel.parseFlexible(requestDTO.getAccountChannel());
         ClientPurchase clientPurchase = new ClientPurchase();
         clientPurchase.setClientName(requestDTO.getClientName());
+        clientPurchase.setAccountChannel(channel);
         clientPurchase.setPurchaseDescription(requestDTO.getPurchaseDescription());
         clientPurchase.setTotalAmount(requestDTO.getTotalAmount());
         clientPurchase.setPurchaseDate(requestDTO.getPurchaseDate());
-        clientPurchase.setDueDate(resolveDueDate(requestDTO, location));
+        clientPurchase.setDueDate(resolveDueDate(requestDTO, location, channel));
         clientPurchase.setNotes(requestDTO.getNotes());
         clientPurchase.setLocation(location);
         ClientPurchase saved = clientPurchaseRepository.save(clientPurchase);
+        ensureSupplierAccount(location, requestDTO.getClientName(), channel);
         recordPurchaseCreditTransaction(saved, location);
         BigDecimal paid = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         return convertToResponseDTO(saved, paid);
@@ -78,10 +83,13 @@ public class ClientPurchaseService {
         ClientPurchase clientPurchase = clientPurchaseRepository.findByIdAndLocation(id, location)
                 .orElseThrow(() -> new RuntimeException("Client purchase not found with id: " + id));
         clientPurchase.setClientName(requestDTO.getClientName());
+        if (requestDTO.getAccountChannel() != null && !requestDTO.getAccountChannel().isBlank()) {
+            clientPurchase.setAccountChannel(ClientAccountChannel.parseFlexible(requestDTO.getAccountChannel()));
+        }
         clientPurchase.setPurchaseDescription(requestDTO.getPurchaseDescription());
         clientPurchase.setTotalAmount(requestDTO.getTotalAmount());
         clientPurchase.setPurchaseDate(requestDTO.getPurchaseDate());
-        clientPurchase.setDueDate(resolveDueDate(requestDTO, location));
+        clientPurchase.setDueDate(resolveDueDate(requestDTO, location, clientPurchase.getAccountChannel()));
         clientPurchase.setNotes(requestDTO.getNotes());
         ClientPurchase updated = clientPurchaseRepository.save(clientPurchase);
         BigDecimal paid = nullToZero(clientPurchasePaymentRepository.sumAmountForPurchaseId(id))
@@ -143,9 +151,21 @@ public class ClientPurchaseService {
         ClientPurchase clientPurchase = clientPurchaseRepository.findByIdAndLocation(clientPurchaseId, location)
                 .orElseThrow(() -> new RuntimeException("Client purchase not found with id: " + clientPurchaseId));
 
+        ClientAccountChannel purchaseChannel = clientPurchase.getAccountChannel() != null
+                ? clientPurchase.getAccountChannel()
+                : ClientAccountChannel.NON_GST;
+        if (requestDTO.getAccountChannel() != null && !requestDTO.getAccountChannel().isBlank()) {
+            ClientAccountChannel reqChannel = ClientAccountChannel.parseFlexible(requestDTO.getAccountChannel());
+            if (reqChannel != purchaseChannel) {
+                throw new RuntimeException("Payment account (" + reqChannel.displayLabel()
+                        + ") must match purchase account (" + purchaseChannel.displayLabel() + ").");
+            }
+        }
+
         ClientPurchasePayment payment = new ClientPurchasePayment();
         payment.setClientPurchase(clientPurchase);
         payment.setClientId(requestDTO.getClientId());
+        payment.setAccountChannel(purchaseChannel);
         payment.setAmount(requestDTO.getAmount());
         payment.setPaymentDate(requestDTO.getDate() != null ? requestDTO.getDate() : LocalDate.now());
         payment.setPaymentMethod(requestDTO.getPaymentMethod());
@@ -155,11 +175,12 @@ public class ClientPurchaseService {
 
         ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
         tx.setClientId(resolveClientKey(clientPurchase, requestDTO.getClientId()));
+        tx.setAccountChannel(purchaseChannel.name());
         tx.setTransactionType("PAYMENT_OUT");
         tx.setAmount(requestDTO.getAmount());
         tx.setPaymentMode(requestDTO.getPaymentMethod());
         tx.setTransactionDate(requestDTO.getDate());
-        String richNote = "Payment to " + clientPurchase.getClientName() + " — "
+        String richNote = "[" + purchaseChannel.displayLabel() + "] Payment to " + clientPurchase.getClientName() + " — "
                 + (clientPurchase.getPurchaseDescription() != null ? clientPurchase.getPurchaseDescription() : "Purchase");
         if (requestDTO.getNotes() != null && !requestDTO.getNotes().isBlank()) {
             richNote = richNote + " — " + requestDTO.getNotes().trim();
@@ -195,7 +216,7 @@ public class ClientPurchaseService {
                 .collect(Collectors.toList());
     }
 
-    private LocalDate resolveDueDate(ClientPurchaseRequestDTO requestDTO, String location) {
+    private LocalDate resolveDueDate(ClientPurchaseRequestDTO requestDTO, String location, ClientAccountChannel channel) {
         if (requestDTO.getDueDate() != null) {
             return requestDTO.getDueDate();
         }
@@ -206,7 +227,11 @@ public class ClientPurchaseService {
         if (key.isEmpty()) {
             return null;
         }
-        return clientSupplierAccountRepository.findByLocationAndClientKey(location != null ? location.trim() : "", key)
+        ClientAccountChannel ch = channel != null ? channel : ClientAccountChannel.NON_GST;
+        return clientSupplierAccountRepository
+                .findByLocationAndClientKeyAndAccountChannel(location != null ? location.trim() : "", key, ch)
+                .or(() -> clientSupplierAccountRepository.findByLocationAndClientKey(
+                        location != null ? location.trim() : "", key))
                 .filter(a -> a.getPaymentTermsDays() != null && a.getPaymentTermsDays() >= 0)
                 .map(a -> requestDTO.getPurchaseDate().plusDays(a.getPaymentTermsDays()))
                 .orElse(null);
@@ -233,6 +258,10 @@ public class ClientPurchaseService {
         ClientPurchaseResponseDTO dto = new ClientPurchaseResponseDTO();
         dto.setId(clientPurchase.getId());
         dto.setClientName(clientPurchase.getClientName());
+        ClientAccountChannel ch = clientPurchase.getAccountChannel() != null
+                ? clientPurchase.getAccountChannel()
+                : ClientAccountChannel.NON_GST;
+        dto.setAccountChannel(ch.name());
         dto.setPurchaseDescription(clientPurchase.getPurchaseDescription());
         dto.setTotalAmount(clientPurchase.getTotalAmount());
         dto.setPurchaseDate(clientPurchase.getPurchaseDate());
@@ -264,6 +293,15 @@ public class ClientPurchaseService {
         dto.setId(payment.getId());
         dto.setClientPurchaseId(payment.getClientPurchase().getId());
         dto.setClientId(payment.getClientId());
+        if (payment.getClientPurchase() != null) {
+            dto.setClientName(payment.getClientPurchase().getClientName());
+        }
+        ClientAccountChannel ch = payment.getAccountChannel() != null
+                ? payment.getAccountChannel()
+                : (payment.getClientPurchase() != null && payment.getClientPurchase().getAccountChannel() != null
+                        ? payment.getClientPurchase().getAccountChannel()
+                        : ClientAccountChannel.NON_GST);
+        dto.setAccountChannel(ch.name());
         dto.setAmount(payment.getAmount());
         dto.setDate(payment.getPaymentDate());
         dto.setPaymentMethod(payment.getPaymentMethod());
@@ -290,6 +328,10 @@ public class ClientPurchaseService {
         }
         ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
         tx.setClientId(purchase.getClientName().trim());
+        ClientAccountChannel ch = purchase.getAccountChannel() != null
+                ? purchase.getAccountChannel()
+                : ClientAccountChannel.NON_GST;
+        tx.setAccountChannel(ch.name());
         tx.setTransactionType("PURCHASE");
         tx.setAmount(delta);
         tx.setPaymentMode("CASH");
@@ -297,7 +339,7 @@ public class ClientPurchaseService {
         String desc = lineDescription != null && !lineDescription.isBlank()
                 ? lineDescription.trim()
                 : (purchase.getPurchaseDescription() != null ? purchase.getPurchaseDescription().trim() : "Additional purchase");
-        tx.setNotes("Additional purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
+        tx.setNotes("[" + ch.displayLabel() + "] Additional purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
         clientTransactionService.create(tx, location, null);
     }
 
@@ -309,12 +351,37 @@ public class ClientPurchaseService {
         }
         ClientTransactionRequestDTO tx = new ClientTransactionRequestDTO();
         tx.setClientId(purchase.getClientName().trim());
+        ClientAccountChannel ch = purchase.getAccountChannel() != null
+                ? purchase.getAccountChannel()
+                : ClientAccountChannel.NON_GST;
+        tx.setAccountChannel(ch.name());
         tx.setTransactionType("PURCHASE");
         tx.setAmount(purchase.getTotalAmount());
         tx.setPaymentMode("CASH");
         tx.setTransactionDate(purchase.getPurchaseDate() != null ? purchase.getPurchaseDate() : LocalDate.now());
         String desc = purchase.getPurchaseDescription() != null ? purchase.getPurchaseDescription().trim() : "Purchase";
-        tx.setNotes("Purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
+        tx.setNotes("[" + ch.displayLabel() + "] Purchase on credit — " + purchase.getClientName().trim() + " — " + desc);
         clientTransactionService.create(tx, location, null);
+    }
+
+    private void ensureSupplierAccount(String location, String clientName, ClientAccountChannel channel) {
+        if (location == null || location.isBlank() || clientName == null || clientName.isBlank()) {
+            return;
+        }
+        String loc = location.trim();
+        String key = ClientSupplierKeys.normalize(clientName);
+        if (key.isEmpty()) {
+            return;
+        }
+        ClientAccountChannel ch = channel != null ? channel : ClientAccountChannel.NON_GST;
+        if (clientSupplierAccountRepository.findByLocationAndClientKeyAndAccountChannel(loc, key, ch).isPresent()) {
+            return;
+        }
+        ClientSupplierAccount row = new ClientSupplierAccount();
+        row.setLocation(loc);
+        row.setClientKey(key);
+        row.setAccountChannel(ch);
+        row.setDisplayName(clientName.trim());
+        clientSupplierAccountRepository.save(row);
     }
 }

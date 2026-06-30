@@ -104,8 +104,10 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
             + "AND m.status = com.katariastoneworld.apis.entity.MoneyTxnStatus.ACTIVE "
             + "AND m.transactionDate >= :from AND m.transactionDate <= :to "
             + "AND m.direction = :direction AND m.paymentMode IN :modes "
-            + "AND (m.subCategory IS NULL OR m.subCategory <> '" + MoneyLedgerCategories.SUB_ADVANCE_APPLICATION + "') "
-            + "AND (m.txnType IS NULL OR m.txnType <> '" + MoneyLedgerCategories.SUB_ADVANCE_APPLICATION + "') ")
+            + "AND (m.subCategory IS NULL OR (m.subCategory <> '" + MoneyLedgerCategories.SUB_ADVANCE_APPLICATION
+            + "' AND m.subCategory <> '" + MoneyLedgerCategories.SUB_CASH_BANK_TRANSFER + "')) "
+            + "AND (m.txnType IS NULL OR (m.txnType <> '" + MoneyLedgerCategories.SUB_ADVANCE_APPLICATION
+            + "' AND m.txnType <> '" + MoneyLedgerCategories.SUB_CASH_BANK_TRANSFER + "')) ")
     BigDecimal sumAmountByLocationDateRangeDirectionModes(
             @Param("location") String location,
             @Param("from") LocalDate from,
@@ -118,7 +120,9 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
             + "AND m.status = com.katariastoneworld.apis.entity.MoneyTxnStatus.ACTIVE "
             + "AND m.transactionDate >= :from AND m.transactionDate <= :to "
             + "AND m.direction = :direction AND m.paymentMode IN :modes "
-            + "AND m.category NOT IN :excludeCategories")
+            + "AND m.category NOT IN :excludeCategories "
+            + "AND (m.subCategory IS NULL OR m.subCategory <> '" + MoneyLedgerCategories.SUB_CASH_BANK_TRANSFER + "') "
+            + "AND (m.txnType IS NULL OR m.txnType <> '" + MoneyLedgerCategories.SUB_CASH_BANK_TRANSFER + "') ")
     BigDecimal sumAmountByLocationDateRangeDirectionModesExcludingCategories(
             @Param("location") String location,
             @Param("from") LocalDate from,
@@ -142,6 +146,20 @@ public interface MoneyTransactionRepository extends JpaRepository<MoneyTransacti
             @Param("categories") Collection<MoneyCategory> categories);
 
     List<MoneyTransaction> findByAdjustmentGroupIdAndIsDeletedFalseOrderByIdAsc(String adjustmentGroupId);
+
+    @Query("SELECT m FROM MoneyTransaction m WHERE m.location = :location "
+            + "AND m.isDeleted = false "
+            + "AND m.status = com.katariastoneworld.apis.entity.MoneyTxnStatus.ACTIVE "
+            + "AND (m.subCategory = :transferSub OR m.txnType = :transferSub) "
+            + "AND (:from IS NULL OR m.transactionDate >= :from) "
+            + "AND (:to IS NULL OR m.transactionDate <= :to) "
+            + "ORDER BY m.transactionDate DESC, m.dateTime DESC, m.id DESC")
+    List<MoneyTransaction> findCashBankTransferRows(
+            @Param("location") String location,
+            @Param("transferSub") String transferSub,
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            Pageable pageable);
 
     boolean existsByReferenceTypeAndReferenceIdAndTxnTypeAndIsDeletedFalse(
             MoneyReferenceType referenceType,

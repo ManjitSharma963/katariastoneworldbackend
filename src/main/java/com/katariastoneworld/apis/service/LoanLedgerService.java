@@ -1,8 +1,10 @@
 package com.katariastoneworld.apis.service;
 
+import com.katariastoneworld.apis.dto.ExpenseRequestDTO;
 import com.katariastoneworld.apis.dto.LoanLedgerEntryResponseDTO;
 import com.katariastoneworld.apis.dto.LoanLenderSummaryDTO;
 import com.katariastoneworld.apis.dto.LoanReceiptRequestDTO;
+import com.katariastoneworld.apis.dto.LoanTransactionEditRequestDTO;
 import com.katariastoneworld.apis.entity.Expense;
 import com.katariastoneworld.apis.entity.ExpenseCategory;
 import com.katariastoneworld.apis.accounting.support.LoanAccountingBridge;
@@ -12,7 +14,9 @@ import com.katariastoneworld.apis.entity.LoanLedgerEntryType;
 import com.katariastoneworld.apis.entity.LoanLender;
 import com.katariastoneworld.apis.repository.LoanLedgerEntryRepository;
 import com.katariastoneworld.apis.repository.LoanLenderRepository;
+import com.katariastoneworld.apis.util.LoanEditWindow;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +42,10 @@ public class LoanLedgerService {
 
     @Autowired
     private LoanAccountingBridge loanAccountingBridge;
+
+    @Autowired
+    @Lazy
+    private ExpenseService expenseService;
 
     /** Matches {@link #syncRepaymentLedger} — daily loan-category expenses get LOAN_REPAY, not EXPENSE, in unified ledger. */
     public boolean isSyncedLoanRepaymentExpense(Expense expense) {
@@ -214,6 +222,104 @@ public class LoanLedgerService {
                 .collect(Collectors.toList());
     }
 
+    public LoanLedgerEntryResponseDTO updateEntry(String location, Long entryId, LoanTransactionEditRequestDTO body) {
+        LoanLedgerEntry entry = loadOwnedLenderEntry(location, entryId);
+        LoanEditWindow.assertEditable(entry.getEntryDate(), entry.getCreatedAt());
+        if (entry.getEntryType() == LoanLedgerEntryType.REPAYMENT) {
+            return updateRepaymentEntry(entry, body, location);
+        }
+        if (entry.getEntryType() != LoanLedgerEntryType.RECEIPT) {
+            throw new IllegalArgumentException("Unsupported lender entry type: " + entry.getEntryType());
+        }
+        loanAccountingBridge.voidLoanReceived(entry.getLocation(), entry.getId(), "loan receipt edited");
+        applyEdit(entry, body);
+        loanLedgerEntryRepository.save(entry);
+        repostReceipt(entry);
+        return toEntryDto(entry);
+    }
+
+    public void deleteEntry(String location, Long entryId) {
+        LoanLedgerEntry entry = loadOwnedLenderEntry(location, entryId);
+        LoanEditWindow.assertEditable(entry.getEntryDate(), entry.getCreatedAt());
+        if (entry.getEntryType() == LoanLedgerEntryType.REPAYMENT) {
+            if (entry.getExpenseId() != null) {
+                expenseService.deleteExpense(entry.getExpenseId(), location.trim());
+                return;
+            }
+            loanLedgerEntryRepository.delete(entry);
+            return;
+        }
+        if (entry.getEntryType() != LoanLedgerEntryType.RECEIPT) {
+            throw new IllegalArgumentException("Unsupported lender entry type: " + entry.getEntryType());
+        }
+        loanAccountingBridge.voidLoanReceived(entry.getLocation(), entry.getId(), "loan receipt deleted");
+        loanLedgerEntryRepository.delete(entry);
+    }
+
+    private LoanLedgerEntryResponseDTO updateRepaymentEntry(
+            LoanLedgerEntry entry, LoanTransactionEditRequestDTO body, String location) {
+        if (entry.getExpenseId() == null) {
+            throw new IllegalArgumentException("This repayment row cannot be edited.");
+        }
+        ExpenseRequestDTO req = new ExpenseRequestDTO();
+        req.setType("daily");
+        req.setCategory("loan_repayment");
+        req.setAmount(body.getAmount());
+        req.setDate(body.getEntryDate() != null ? body.getEntryDate() : entry.getEntryDate());
+        req.setPaymentMethod(body.getPaymentMode() != null ? body.getPaymentMode() : parsePaymentModeFromNotes(entry.getNotes()));
+        req.setDescription(body.getNotes() != null ? body.getNotes() : stripModeFromNotes(entry.getNotes()));
+        req.setLenderId(entry.getLenderId());
+        expenseService.updateExpense(entry.getExpenseId(), req, location.trim());
+        return loanLedgerEntryRepository.findById(entry.getId())
+                .map(this::toEntryDto)
+                .orElseThrow(() -> new IllegalArgumentException("Loan entry not found after update"));
+    }
+
+    private void applyEdit(LoanLedgerEntry entry, LoanTransactionEditRequestDTO body) {
+        entry.setAmount(body.getAmount().setScale(2, RoundingMode.HALF_UP));
+        if (body.getEntryDate() != null) {
+            entry.setEntryDate(body.getEntryDate());
+        }
+        String mode = normalizePaymentMode(body.getPaymentMode() != null
+                ? body.getPaymentMode()
+                : parsePaymentModeFromNotes(entry.getNotes()));
+        entry.setNotes(composeNotesWithMode(body.getNotes() != null ? body.getNotes() : stripModeFromNotes(entry.getNotes()), mode));
+    }
+
+    private void repostReceipt(LoanLedgerEntry entry) {
+        LoanLender lender = loanLenderRepository.findById(entry.getLenderId())
+                .orElseThrow(() -> new IllegalArgumentException("Lender not found: " + entry.getLenderId()));
+        String mode = normalizePaymentMode(parsePaymentModeFromNotes(entry.getNotes()));
+        LedgerPaymentMode ledgerPm = switch (mode) {
+            case "bank_transfer" -> LedgerPaymentMode.BANK;
+            case "cheque" -> LedgerPaymentMode.CHEQUE;
+            case "upi" -> LedgerPaymentMode.UPI;
+            default -> LedgerPaymentMode.CASH;
+        };
+        loanAccountingBridge.postLoanReceived(
+                entry.getLocation(),
+                entry.getId(),
+                lender.getId(),
+                lender.getDisplayName(),
+                entry.getAmount(),
+                ledgerPm,
+                entry.getEntryDate(),
+                entry.getNotes());
+    }
+
+    private LoanLedgerEntry loadOwnedLenderEntry(String location, Long entryId) {
+        if (entryId == null) {
+            throw new IllegalArgumentException("Entry id is required");
+        }
+        String loc = location == null ? "" : location.trim();
+        LoanLedgerEntry entry = loanLedgerEntryRepository.findById(entryId)
+                .orElseThrow(() -> new IllegalArgumentException("Loan entry not found: " + entryId));
+        if (!loc.equalsIgnoreCase(entry.getLocation() != null ? entry.getLocation().trim() : "")) {
+            throw new IllegalArgumentException("Loan entry not found for your location.");
+        }
+        return entry;
+    }
+
     private LoanLedgerEntryResponseDTO toEntryDto(LoanLedgerEntry e) {
         LoanLedgerEntryResponseDTO dto = new LoanLedgerEntryResponseDTO();
         dto.setId(e.getId());
@@ -223,6 +329,7 @@ public class LoanLedgerService {
         dto.setNotes(e.getNotes());
         dto.setExpenseId(e.getExpenseId());
         dto.setCreatedAt(e.getCreatedAt());
+        dto.setPaymentMode(parsePaymentModeFromNotes(e.getNotes()));
         return dto;
     }
 
@@ -289,6 +396,33 @@ public class LoanLedgerService {
         if (n == null) return suffix;
         // Keep existing notes readable
         return n + " · " + suffix;
+    }
+
+    static String parsePaymentModeFromNotes(String notes) {
+        if (notes == null || notes.isBlank()) {
+            return "cash";
+        }
+        int idx = notes.lastIndexOf("Mode: ");
+        if (idx < 0) {
+            return "cash";
+        }
+        String tail = notes.substring(idx + 6).trim();
+        int dot = tail.indexOf(" · ");
+        return dot >= 0 ? tail.substring(0, dot).trim() : tail.trim();
+    }
+
+    static String stripModeFromNotes(String notes) {
+        if (notes == null || notes.isBlank()) {
+            return null;
+        }
+        int idx = notes.lastIndexOf(" · Mode: ");
+        if (idx >= 0) {
+            return trimToNull(notes.substring(0, idx));
+        }
+        if (notes.trim().startsWith("Mode: ")) {
+            return null;
+        }
+        return trimToNull(notes);
     }
 
     private void assertLenderBelongsToLocation(Long lenderId, String expenseLocation) {

@@ -128,5 +128,19 @@ public class BillRequestDTO {
     @Size(max = 2000, message = "Notes must be at most 2000 characters")
     @JsonAlias({ "description" })
     private String notes;
+
+    /** When true, bill is linked to a sales agent commission. */
+    private Boolean dealThroughAgent;
+
+    private Long agentId;
+
+    @Size(max = 20)
+    private String agentCommissionType;
+
+    @PositiveOrZero
+    private Double agentCommissionValue;
+
+    @Size(max = 2000)
+    private String agentCommissionNotes;
 }
 

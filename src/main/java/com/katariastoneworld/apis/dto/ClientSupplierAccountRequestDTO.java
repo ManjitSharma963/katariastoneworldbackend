@@ -17,6 +17,8 @@ public class ClientSupplierAccountRequestDTO {
 
     private String displayName;
 
+    private String accountChannel;
+
     private BigDecimal creditLimit;
 
     private Integer paymentTermsDays;

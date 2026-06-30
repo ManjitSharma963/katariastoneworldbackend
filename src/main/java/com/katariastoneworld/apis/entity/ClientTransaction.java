@@ -29,6 +29,10 @@ public class ClientTransaction {
     private String clientId;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "account_channel", nullable = false, length = 16)
+    private ClientAccountChannel accountChannel = ClientAccountChannel.NON_GST;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "transaction_type", nullable = false, length = 32)
     private ClientTransactionType transactionType;
 
@@ -67,6 +71,7 @@ public class ClientTransaction {
     protected void onCreate() {
         if (createdAt == null) createdAt = LocalDateTime.now();
         if (transactionDate == null) transactionDate = LocalDate.now();
+        if (accountChannel == null) accountChannel = ClientAccountChannel.NON_GST;
     }
 
     @PreUpdate

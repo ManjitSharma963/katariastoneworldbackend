@@ -29,5 +29,8 @@ public class ClientPurchasePaymentRequestDTO {
     private String paymentMethod;
     
     private String notes;
+
+    /** Must match purchase account when paying a specific purchase; required for general payments. */
+    private String accountChannel;
 }
 

@@ -16,6 +16,8 @@ import com.katariastoneworld.apis.dto.BillSupplementarySummaryDTO;
 import com.katariastoneworld.apis.dto.BillReturnRefundMode;
 import com.katariastoneworld.apis.dto.BillCancellationLogDTO;
 import com.katariastoneworld.apis.dto.BillEventResponseDTO;
+import com.katariastoneworld.apis.constants.AgentCommissionStatus;
+import com.katariastoneworld.apis.constants.AgentCommissionType;
 import com.katariastoneworld.apis.constants.BillLifecycleStatus;
 import com.katariastoneworld.apis.accounting.support.BillPaymentAccountingBridge;
 import com.katariastoneworld.apis.accounting.support.RefundAccountingBridge;
@@ -41,6 +43,7 @@ import com.katariastoneworld.apis.entity.MoneyReferenceType;
 import com.katariastoneworld.apis.entity.MoneyTransaction;
 import com.katariastoneworld.apis.entity.MoneyTxnStatus;
 import com.katariastoneworld.apis.entity.Product;
+import com.katariastoneworld.apis.entity.SalesAgent;
 import com.katariastoneworld.apis.repository.BillCancellationLogRepository;
 import com.katariastoneworld.apis.repository.BillGSTRepository;
 import com.katariastoneworld.apis.repository.BillInventoryReturnLineRepository;
@@ -49,6 +52,7 @@ import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.repository.BillPaymentRepository;
 import com.katariastoneworld.apis.repository.BillVersionRepository;
 import com.katariastoneworld.apis.repository.MoneyTransactionRepository;
+import com.katariastoneworld.apis.repository.SalesAgentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -205,6 +209,12 @@ public class BillService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private SalesAgentService salesAgentService;
+
+    @Autowired
+    private SalesAgentRepository salesAgentRepository;
 
     public BillResponseDTO createBill(BillRequestDTO billRequestDTO, String location, Long createdByUserId, String userRole) {
         // Get or create customer with details
@@ -1004,6 +1014,7 @@ public class BillService {
 
         String billHsnFromRequest = trimToNull(billRequestDTO.getHsnCode());
         bill.setHsnCode(billHsnFromRequest != null ? billHsnFromRequest : firstInventoryHsn);
+        applyAgentCommissionGst(bill, billRequestDTO, location, totalAmount);
 
         // Save GST bill (payment fields finalized after advance + payment lines)
         BillGST savedBill = billGSTRepository.save(bill);
@@ -1198,6 +1209,8 @@ public class BillService {
             bill.addItem(item);
         }
 
+        applyAgentCommissionNonGst(bill, billRequestDTO, location, totalAmount);
+
         // Save NonGST bill
         BillNonGST savedBill = billNonGSTRepository.save(bill);
         int billVersionNo = 1;
@@ -1316,6 +1329,7 @@ public class BillService {
             BillPayment saved = billPaymentRepository.save(row);
             createTransactionFromBillPayment(saved, currentBillVersionRowId, opLinkedGroupId, "BILL_PAYMENT");
             refreshBillFinancialsGST(bill, billLocation);
+            applyBillSettlementIfRequested(bill, paymentRequest, billLocation);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
             recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, null);
             bill.setCurrentVersionNo(nextVersionNo);
@@ -1360,9 +1374,10 @@ public class BillService {
         row.setUpdatedBy(actorUserId);
         row.setBillVersionId(currentBillVersionRowId);
         BillPayment saved = billPaymentRepository.save(row);
-        createTransactionFromBillPayment(saved, currentBillVersionRowId, opLinkedGroupId, "BILL_PAYMENT");
-        refreshBillFinancialsNonGST(bill, billLocation);
-        BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
+            createTransactionFromBillPayment(saved, currentBillVersionRowId, opLinkedGroupId, "BILL_PAYMENT");
+            refreshBillFinancialsNonGST(bill, billLocation);
+            applyBillSettlementIfRequested(bill, paymentRequest, billLocation);
+            BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
         recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, null);
         bill.setCurrentVersionNo(nextVersionNo);
         billNonGSTRepository.save(bill);
@@ -1385,7 +1400,11 @@ public class BillService {
         if (isAdvancePayment(row)) {
             throw new IllegalArgumentException("Wallet advance row cannot be edited");
         }
+        if (Boolean.TRUE.equals(row.getIsDeleted())) {
+            throw new IllegalArgumentException("Cannot edit a deleted payment");
+        }
         LocalDate oldPaymentDate = row.getPaymentDate();
+        BillPaymentMode oldMode = row.getPaymentMode() != null ? row.getPaymentMode() : BillPaymentMode.OTHER;
         BigDecimal oldAmount = row.getAmount() != null ? row.getAmount().setScale(2, RoundingMode.HALF_UP)
                 : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BillPaymentMode newMode = parseBillPaymentMode(paymentRequest.getPaymentMode());
@@ -1413,6 +1432,8 @@ public class BillService {
             row.setUpdatedBy(actorUserId);
             BillPayment saved = billPaymentRepository.save(row);
             refreshBillFinancialsGST(bill, billLocation);
+            String payAdjGroup = newLinkedGroupId();
+            syncLedgerAfterBillPaymentEdit(saved, billLocation, payAdjGroup, oldMode, oldAmount, oldPaymentDate);
             BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, billId);
             Set<LocalDate> extra = null;
             if (oldPaymentDate != null && saved.getPaymentDate() != null && !oldPaymentDate.equals(saved.getPaymentDate())) {
@@ -1420,7 +1441,6 @@ public class BillService {
                 extra.add(oldPaymentDate);
             }
             recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.GST, billId, extra);
-            String payAdjGroup = newLinkedGroupId();
             recordBillEvent(BillKind.GST, billId, BillEventType.PAYMENT_ADJUSTED, null, payAdjGroup, actorUserId,
                     java.util.Map.of(
                             "paymentId", paymentId,
@@ -1453,6 +1473,8 @@ public class BillService {
         row.setUpdatedBy(actorUserId);
         BillPayment saved = billPaymentRepository.save(row);
         refreshBillFinancialsNonGST(bill, billLocation);
+        String payAdjGroup = newLinkedGroupId();
+        syncLedgerAfterBillPaymentEdit(saved, billLocation, payAdjGroup, oldMode, oldAmount, oldPaymentDate);
         BigDecimal updatedAdv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, billId);
         Set<LocalDate> extra = null;
         if (oldPaymentDate != null && saved.getPaymentDate() != null && !oldPaymentDate.equals(saved.getPaymentDate())) {
@@ -1460,7 +1482,6 @@ public class BillService {
             extra.add(oldPaymentDate);
         }
         recomputeSnapshotsForBillFromDbPayments(billLocation, bill.getBillDate(), BillKind.NON_GST, billId, extra);
-        String payAdjGroup = newLinkedGroupId();
         recordBillEvent(BillKind.NON_GST, billId, BillEventType.PAYMENT_ADJUSTED, null, payAdjGroup, actorUserId,
                 java.util.Map.of(
                         "paymentId", paymentId,
@@ -1985,6 +2006,7 @@ public class BillService {
             bill.setCurrentVersionNo(nextVersionNo);
             bill.setLatestVersion(true);
             bill.setBillStatus("CANCELLED");
+            SalesAgentService.cancelCommissionOnBill(bill);
             billGSTRepository.save(bill);
             BillResponseDTO snapshot = convertGSTToResponseDTO(
                     bill,
@@ -2042,6 +2064,7 @@ public class BillService {
         bill.setCurrentVersionNo(nextVersionNo);
         bill.setLatestVersion(true);
         bill.setBillStatus(BillLifecycleStatus.CANCELLED);
+        SalesAgentService.cancelCommissionOnBill(bill);
         billNonGSTRepository.save(bill);
         BillResponseDTO snapshot = convertNonGSTToResponseDTO(
                 bill,
@@ -2680,10 +2703,14 @@ public class BillService {
                 .collect(Collectors.toList());
 
         responseDTO.setItems(itemDTOs);
+        responseDTO.setItemsCount(itemDTOs.size());
 
         enrichBillPayments(responseDTO, paymentRows, bill.getTotalAmount(), bill.getPaymentMethod(),
                 bill.getPaymentStatus().name(), advanceUsed);
         enrichBillReturnSummaryForGst(bill, responseDTO, returnedByLineGst);
+        enrichAgentCommission(responseDTO, bill.getAgentId(), bill.getAgentCommissionType(),
+                bill.getAgentCommissionValue(), bill.getAgentCommissionAmount(),
+                bill.getAgentCommissionStatus(), bill.getAgentCommissionNotes());
         return responseDTO;
     }
 
@@ -2778,10 +2805,14 @@ public class BillService {
                 .collect(Collectors.toList());
 
         responseDTO.setItems(itemDTOs);
+        responseDTO.setItemsCount(itemDTOs.size());
 
         enrichBillPayments(responseDTO, paymentRows, bill.getTotalAmount(), bill.getPaymentMethod(),
                 bill.getPaymentStatus().name(), advanceUsed);
         enrichBillReturnSummaryForNonGst(bill, responseDTO, returnedByLineNon);
+        enrichAgentCommission(responseDTO, bill.getAgentId(), bill.getAgentCommissionType(),
+                bill.getAgentCommissionValue(), bill.getAgentCommissionAmount(),
+                bill.getAgentCommissionStatus(), bill.getAgentCommissionNotes());
         return responseDTO;
     }
 
@@ -2833,6 +2864,8 @@ public class BillService {
             lifecycle = BillLifecycleStatus.COMPLETED;
         }
         responseDTO.setBillLifecycleStatus(lifecycle);
+        int lineCount = bill.getItems() != null ? bill.getItems().size() : 0;
+        responseDTO.setItemsCount(lineCount);
         responseDTO.setItems(List.of());
         enrichBillPayments(responseDTO, paymentRows, bill.getTotalAmount(), bill.getPaymentMethod(),
                 bill.getPaymentStatus().name(), advanceUsed);
@@ -3047,7 +3080,10 @@ public class BillService {
         BigDecimal total = billTotal.setScale(2, RoundingMode.HALF_UP);
         List<BillPayment> nonAdvanceRows = paymentRows == null
                 ? List.of()
-                : paymentRows.stream().filter(p -> !isAdvancePayment(p)).collect(Collectors.toList());
+                : paymentRows.stream()
+                        .filter(p -> !isAdvancePayment(p))
+                        .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
+                        .collect(Collectors.toList());
         BigDecimal paid = sumNonAdvancePayments(nonAdvanceRows);
 
         boolean inferLegacyFull = adv.compareTo(BigDecimal.ZERO) == 0
@@ -3065,6 +3101,9 @@ public class BillService {
         dto.setTotalPaid(paid.doubleValue());
         dto.setPaidAmount(paid.doubleValue());
         BigDecimal due = total.subtract(adv).subtract(paid).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        if (paymentStatusName != null && "PAID".equalsIgnoreCase(paymentStatusName.trim())) {
+            due = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
         dto.setAmountDue(due.doubleValue());
         dto.setPayments(nonAdvanceRows.stream().map(this::toPaymentResponseDTO).collect(Collectors.toList()));
 
@@ -4172,6 +4211,55 @@ public class BillService {
         }
     }
 
+    private void applyBillSettlementIfRequested(Object billEntity, BillPaymentRequestDTO paymentRequest, String location) {
+        if (paymentRequest == null || !Boolean.TRUE.equals(paymentRequest.getSettleBill())) {
+            return;
+        }
+        if (billEntity instanceof BillGST gst) {
+            List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, gst.getId());
+            BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, gst.getId())
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal paid = sumNonAdvancePayments(rows);
+            BigDecimal shortfall = gst.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            if (shortfall.compareTo(PAY_ROUND_EPS) > 0) {
+                gst.setNotes(appendBillNote(gst.getNotes(),
+                        "Settlement write-off: ₹" + shortfall.toPlainString()));
+            }
+            gst.setPaymentStatus(BillGST.PaymentStatus.PAID);
+            if (location != null && !location.isBlank() && (gst.getLocation() == null || gst.getLocation().isBlank())) {
+                gst.setLocation(location.trim());
+            }
+            billGSTRepository.save(gst);
+        } else if (billEntity instanceof BillNonGST nonGst) {
+            List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.NON_GST, nonGst.getId());
+            BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.NON_GST, nonGst.getId())
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal paid = sumNonAdvancePayments(rows);
+            BigDecimal shortfall = nonGst.getTotalAmount().subtract(adv).subtract(paid).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            if (shortfall.compareTo(PAY_ROUND_EPS) > 0) {
+                nonGst.setNotes(appendBillNote(nonGst.getNotes(),
+                        "Settlement write-off: ₹" + shortfall.toPlainString()));
+            }
+            nonGst.setPaymentStatus(BillNonGST.PaymentStatus.PAID);
+            if (location != null && !location.isBlank() && (nonGst.getLocation() == null || nonGst.getLocation().isBlank())) {
+                nonGst.setLocation(location.trim());
+            }
+            billNonGSTRepository.save(nonGst);
+        }
+    }
+
+    private static String appendBillNote(String existing, String line) {
+        if (line == null || line.isBlank()) {
+            return existing;
+        }
+        if (existing == null || existing.isBlank()) {
+            return line.trim();
+        }
+        return existing.trim() + "\n" + line.trim();
+    }
+
     private void refreshBillFinancialsGST(BillGST bill, String location) {
         List<BillPayment> rows = billPaymentRepository.findByBillKindAndBillIdOrderByIdAsc(BillKind.GST, bill.getId());
         BigDecimal adv = customerAdvanceService.sumAdvanceUsedForBill(BillKind.GST, bill.getId()).setScale(2, RoundingMode.HALF_UP);
@@ -4536,6 +4624,37 @@ public class BillService {
     }
 
     /**
+     * After mode/amount/date edit on an in-hand bill payment: void the stale money row and post again
+     * so in-hand, budget, and reconciliation follow {@code bill_payments}.
+     */
+    private void syncLedgerAfterBillPaymentEdit(
+            BillPayment saved,
+            String billLocation,
+            String linkedGroupId,
+            BillPaymentMode oldMode,
+            BigDecimal oldAmount,
+            LocalDate oldPaymentDate) {
+        if (saved == null || saved.getId() == null || isAdvancePayment(saved)) {
+            return;
+        }
+        if (billLocation == null || billLocation.isBlank()) {
+            return;
+        }
+        BillPaymentMode newMode = saved.getPaymentMode() != null ? saved.getPaymentMode() : BillPaymentMode.OTHER;
+        BigDecimal newAmount = saved.getAmount() != null
+                ? saved.getAmount().setScale(2, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        LocalDate newPaymentDate = saved.getPaymentDate();
+        boolean ledgerFieldsChanged = !Objects.equals(oldMode, newMode)
+                || oldAmount.compareTo(newAmount) != 0
+                || !Objects.equals(oldPaymentDate, newPaymentDate);
+        if (!ledgerFieldsChanged) {
+            return;
+        }
+        billPaymentAccountingBridge.syncBillPaymentLedgerAfterEdit(saved, linkedGroupId, "BILL_PAYMENT");
+    }
+
+    /**
      * Soft-voids active {@code transactions} rows for a bill payment (wallet advance mirror rows only).
      */
     private void voidActiveMoneyTransactionsForBillPayment(Long billPaymentId) {
@@ -4710,6 +4829,7 @@ public class BillService {
         }
         return rows.stream()
                 .filter(r -> !isAdvancePayment(r))
+                .filter(r -> !Boolean.TRUE.equals(r.getIsDeleted()))
                 .map(BillPayment::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -5133,5 +5253,63 @@ public class BillService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private void applyAgentCommissionGst(BillGST bill, BillRequestDTO req, String location, BigDecimal totalAmount) {
+        if (!Boolean.TRUE.equals(req.getDealThroughAgent())) {
+            return;
+        }
+        if (req.getAgentId() == null) {
+            throw new IllegalArgumentException("Select an agent when recording a deal through agent");
+        }
+        SalesAgent agent = salesAgentService.requireAgentForLocation(req.getAgentId(), location);
+        String type = req.getAgentCommissionType() != null && !req.getAgentCommissionType().isBlank()
+                ? AgentCommissionType.normalize(req.getAgentCommissionType())
+                : agent.getDefaultCommissionType();
+        BigDecimal value = req.getAgentCommissionValue() != null
+                ? BigDecimal.valueOf(req.getAgentCommissionValue()).setScale(2, RoundingMode.HALF_UP)
+                : agent.getDefaultCommissionValue();
+        bill.setAgentId(agent.getId());
+        bill.setAgentCommissionType(type);
+        bill.setAgentCommissionValue(value);
+        bill.setAgentCommissionAmount(SalesAgentService.calculateCommissionAmount(totalAmount, type, value));
+        bill.setAgentCommissionStatus(AgentCommissionStatus.PENDING);
+        bill.setAgentCommissionNotes(trimToNull(req.getAgentCommissionNotes()));
+    }
+
+    private void applyAgentCommissionNonGst(BillNonGST bill, BillRequestDTO req, String location, BigDecimal totalAmount) {
+        if (!Boolean.TRUE.equals(req.getDealThroughAgent())) {
+            return;
+        }
+        if (req.getAgentId() == null) {
+            throw new IllegalArgumentException("Select an agent when recording a deal through agent");
+        }
+        SalesAgent agent = salesAgentService.requireAgentForLocation(req.getAgentId(), location);
+        String type = req.getAgentCommissionType() != null && !req.getAgentCommissionType().isBlank()
+                ? AgentCommissionType.normalize(req.getAgentCommissionType())
+                : agent.getDefaultCommissionType();
+        BigDecimal value = req.getAgentCommissionValue() != null
+                ? BigDecimal.valueOf(req.getAgentCommissionValue()).setScale(2, RoundingMode.HALF_UP)
+                : agent.getDefaultCommissionValue();
+        bill.setAgentId(agent.getId());
+        bill.setAgentCommissionType(type);
+        bill.setAgentCommissionValue(value);
+        bill.setAgentCommissionAmount(SalesAgentService.calculateCommissionAmount(totalAmount, type, value));
+        bill.setAgentCommissionStatus(AgentCommissionStatus.PENDING);
+        bill.setAgentCommissionNotes(trimToNull(req.getAgentCommissionNotes()));
+    }
+
+    private void enrichAgentCommission(BillResponseDTO dto, Long agentId, String type, BigDecimal value,
+                                       BigDecimal amount, String status, String notes) {
+        dto.setDealThroughAgent(agentId != null);
+        dto.setAgentId(agentId);
+        dto.setAgentCommissionType(type);
+        dto.setAgentCommissionValue(value != null ? value.doubleValue() : null);
+        dto.setAgentCommissionAmount(amount != null ? amount.doubleValue() : null);
+        dto.setAgentCommissionStatus(status);
+        dto.setAgentCommissionNotes(notes);
+        if (agentId != null) {
+            salesAgentRepository.findById(agentId).ifPresent(a -> dto.setAgentName(a.getName()));
+        }
     }
 }

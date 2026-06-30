@@ -68,6 +68,47 @@ public class BillPaymentAccountingBridge {
         voidLegacy(billPaymentId);
     }
 
+    /**
+     * Keeps {@code transactions} aligned when a bill payment line is edited (mode / amount / date).
+     * Updates active ledger rows in place when present; otherwise voids stale rows and reposts.
+     */
+    public void syncBillPaymentLedgerAfterEdit(BillPayment payment, String linkedGroupId, String txnType) {
+        if (payment == null || payment.getId() == null) {
+            return;
+        }
+        if ("ADVANCE".equalsIgnoreCase(String.valueOf(payment.getSourceType()))) {
+            return;
+        }
+        BillPaymentContext ctx = resolveContext(payment);
+        if (ctx == null) {
+            return;
+        }
+
+        var activeRows = moneyTransactionRepository
+                .findByBillPaymentIdAndIsDeletedFalseOrderByIdAsc(payment.getId())
+                .stream()
+                .filter(r -> r.getStatus() == MoneyTxnStatus.ACTIVE)
+                .toList();
+
+        if (!activeRows.isEmpty()) {
+            LocalDate txDate = payment.getPaymentDate() != null ? payment.getPaymentDate() : LocalDate.now();
+            for (MoneyTransaction tx : activeRows) {
+                tx.setPaymentMode(ctx.paymentMode());
+                tx.setAmount(ctx.amount());
+                tx.setTransactionDate(txDate);
+                tx.setDateTime(LocalDateTime.now());
+                if (linkedGroupId != null && !linkedGroupId.isBlank()) {
+                    tx.setLinkedGroupId(linkedGroupId.trim());
+                }
+            }
+            moneyTransactionRepository.saveAll(activeRows);
+            return;
+        }
+
+        voidBillPaymentLedger(payment.getId(), "bill payment resync after edit");
+        postBillPaymentLedger(payment, null, linkedGroupId, txnType);
+    }
+
     private void postViaEngine(BillPayment payment, Long billVersionId, String linkedGroupId, String txnType) {
         BillPaymentContext ctx = resolveContext(payment);
         if (ctx == null) {
