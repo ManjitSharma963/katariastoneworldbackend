@@ -7,7 +7,12 @@ import com.katariastoneworld.apis.dto.ReceivableLedgerEntryResponseDTO;
 import com.katariastoneworld.apis.entity.LoanBorrower;
 import com.katariastoneworld.apis.entity.ReceivableLedgerEntry;
 import com.katariastoneworld.apis.entity.ReceivableLedgerEntryType;
+import com.katariastoneworld.apis.entity.Expense;
+import com.katariastoneworld.apis.entity.ExpenseCategory;
+import com.katariastoneworld.apis.entity.ReferenceType;
 import com.katariastoneworld.apis.accounting.support.ReceivableAccountingBridge;
+import com.katariastoneworld.apis.accounting.support.ExpenseAccountingBridge;
+import com.katariastoneworld.apis.repository.ExpenseRepository;
 import com.katariastoneworld.apis.repository.LoanBorrowerRepository;
 import com.katariastoneworld.apis.repository.ReceivableLedgerEntryRepository;
 import com.katariastoneworld.apis.util.LoanEditWindow;
@@ -40,6 +45,45 @@ public class ReceivableLedgerService {
     @Autowired
     private ReceivableAccountingBridge receivableAccountingBridge;
 
+    @Autowired
+    private ExpenseRepository expenseRepository;
+
+    @Autowired
+    private ExpenseAccountingBridge expenseAccountingBridge;
+
+    /** Matches {@link #mirrorDisbursementExpense} — cash out is LOAN_GIVEN in unified ledger, not EXPENSE. */
+    public static boolean isSyncedLoanGivenExpense(Expense expense) {
+        if (expense == null) {
+            return false;
+        }
+        if (expense.getExpenseCategory() != ExpenseCategory.LOAN) {
+            return false;
+        }
+        if (expense.getType() == null || !"daily".equalsIgnoreCase(expense.getType().trim())) {
+            return false;
+        }
+        if (expense.getCategory() == null) {
+            return false;
+        }
+        String c = expense.getCategory().trim().toLowerCase(Locale.ROOT);
+        return "loan_given".equals(c) || "loan_outflow".equals(c);
+    }
+
+    public boolean hasDisbursementLedgerRowForExpense(Long expenseId) {
+        return expenseId != null && receivableLedgerEntryRepository.findByExpenseId(expenseId).isPresent();
+    }
+
+    public void deleteDisbursementByExpenseId(Long expenseId) {
+        if (expenseId == null) {
+            return;
+        }
+        receivableLedgerEntryRepository.findByExpenseId(expenseId).ifPresent(entry -> {
+            receivableAccountingBridge.voidReceivableEntry(
+                    entry.getLocation(), entry.getId(), "LOAN_GIVEN", "loan given expense removed");
+            receivableLedgerEntryRepository.delete(entry);
+        });
+    }
+
     /**
      * Record principal lent out (cash/UPI/bank/cheque). Unified ledger: DEBIT.
      * Cash/UPI reduce today's in-hand daily budget.
@@ -60,6 +104,7 @@ public class ReceivableLedgerService {
         String mode = normalizePaymentMode(body.getPaymentMode());
         entry.setNotes(composeNotesWithMode(body.getNotes(), mode));
         receivableLedgerEntryRepository.save(entry);
+        mirrorDisbursementExpense(entry, borrower, mode);
         receivableAccountingBridge.postDisbursement(entry, borrower, mode);
     }
 
@@ -139,6 +184,7 @@ public class ReceivableLedgerService {
                 .orElseThrow(() -> new IllegalArgumentException("Borrower not found: " + entry.getBorrowerId()));
         String mode = normalizePaymentMode(parsePaymentModeFromNotes(entry.getNotes()));
         if (entry.getEntryType() == ReceivableLedgerEntryType.DISBURSEMENT) {
+            syncMirroredDisbursementExpense(entry, borrower);
             receivableAccountingBridge.postDisbursement(entry, borrower, mode);
         } else if (entry.getEntryType() == ReceivableLedgerEntryType.REPAYMENT_RECEIVED) {
             receivableAccountingBridge.postRepaymentReceived(entry, borrower, mode);
@@ -153,6 +199,13 @@ public class ReceivableLedgerService {
         LoanEditWindow.assertEditable(entry.getEntryDate(), entry.getCreatedAt());
         receivableAccountingBridge.voidReceivableEntry(
                 entry.getLocation(), entry.getId(), ledgerTxnTypeFor(entry), "loan entry deleted");
+        if (entry.getEntryType() == ReceivableLedgerEntryType.DISBURSEMENT && entry.getExpenseId() != null) {
+            expenseRepository.findById(entry.getExpenseId()).ifPresent(expense -> {
+                expenseAccountingBridge.voidExpenseMoneyLines(expense, "loan given removed");
+                expense.setIsDeleted(true);
+                expenseRepository.save(expense);
+            });
+        }
         receivableLedgerEntryRepository.delete(entry);
     }
 
@@ -207,8 +260,54 @@ public class ReceivableLedgerService {
         dto.setEntryDate(e.getEntryDate());
         dto.setNotes(e.getNotes());
         dto.setPaymentMode(parsePaymentModeFromNotes(e.getNotes()));
+        dto.setExpenseId(e.getExpenseId());
         dto.setCreatedAt(e.getCreatedAt());
         return dto;
+    }
+
+    private void mirrorDisbursementExpense(ReceivableLedgerEntry entry, LoanBorrower borrower, String mode) {
+        Expense expense = new Expense();
+        expense.setType("daily");
+        expense.setCategory("loan_given");
+        expense.setDate(entry.getEntryDate() != null ? entry.getEntryDate() : LocalDate.now());
+        expense.setAmount(entry.getAmount());
+        expense.setPaymentMethod(mode);
+        expense.setLocation(entry.getLocation());
+        expense.setExpenseCategory(ExpenseCategory.LOAN);
+        expense.setReferenceType(ReferenceType.DIRECT);
+        String borrowerName = borrower.getDisplayName() != null ? borrower.getDisplayName().trim() : "Borrower";
+        String noteText = stripModeFromNotes(entry.getNotes());
+        expense.setDescription(
+                noteText != null && !noteText.isBlank()
+                        ? "Loan given to " + borrowerName + " — " + noteText
+                        : "Loan given to " + borrowerName);
+        Expense saved = expenseRepository.save(expense);
+        entry.setExpenseId(saved.getId());
+        receivableLedgerEntryRepository.save(entry);
+        expenseAccountingBridge.syncExpenseLedger(saved);
+    }
+
+    private void syncMirroredDisbursementExpense(ReceivableLedgerEntry entry, LoanBorrower borrower) {
+        if (entry.getExpenseId() == null) {
+            mirrorDisbursementExpense(entry, borrower, normalizePaymentMode(parsePaymentModeFromNotes(entry.getNotes())));
+            return;
+        }
+        Expense expense = expenseRepository.findById(entry.getExpenseId())
+                .orElseThrow(() -> new IllegalArgumentException("Linked expense not found: " + entry.getExpenseId()));
+        expense.setAmount(entry.getAmount());
+        if (entry.getEntryDate() != null) {
+            expense.setDate(entry.getEntryDate());
+        }
+        String mode = normalizePaymentMode(parsePaymentModeFromNotes(entry.getNotes()));
+        expense.setPaymentMethod(mode);
+        String borrowerName = borrower.getDisplayName() != null ? borrower.getDisplayName().trim() : "Borrower";
+        String noteText = stripModeFromNotes(entry.getNotes());
+        expense.setDescription(
+                noteText != null && !noteText.isBlank()
+                        ? "Loan given to " + borrowerName + " — " + noteText
+                        : "Loan given to " + borrowerName);
+        Expense saved = expenseRepository.save(expense);
+        expenseAccountingBridge.syncExpenseLedger(saved);
     }
 
     private LoanBorrower resolveBorrowerForRequest(String loc, ReceivableLendRequestDTO body) {

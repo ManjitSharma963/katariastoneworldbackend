@@ -2,3 +2,18 @@ target/
 *.class
 *.jar
 *.log
+
+# Local secrets — never commit
+.env
+.env.*
+!.env.example
+deploy/local.env
+deploy/railway.env
+*.local.properties
+!application-local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp

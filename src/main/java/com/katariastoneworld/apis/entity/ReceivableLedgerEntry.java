@@ -41,6 +41,10 @@ public class ReceivableLedgerEntry {
     @Column(columnDefinition = "TEXT")
     private String notes;
 
+    /** Set for DISBURSEMENT rows mirrored into {@code expenses}. */
+    @Column(name = "expense_id")
+    private Long expenseId;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

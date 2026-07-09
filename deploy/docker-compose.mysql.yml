@@ -1,0 +1,24 @@
+# Local MySQL for development (optional).
+# Usage: docker compose -f deploy/docker-compose.mysql.yml up -d
+# Then set in IDE or env:
+#   SPRING_DATASOURCE_PASSWORD=rootpassword123
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kataria-mysql-local
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword123
+      MYSQL_DATABASE: new_db
+    volumes:
+      - kataria_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpassword123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  kataria_mysql_data:

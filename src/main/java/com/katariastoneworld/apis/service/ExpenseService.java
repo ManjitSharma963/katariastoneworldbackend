@@ -31,6 +31,9 @@ public class ExpenseService {
     private LoanLedgerService loanLedgerService;
 
     @Autowired
+    private ReceivableLedgerService receivableLedgerService;
+
+    @Autowired
     private ExpenseAccountingBridge expenseAccountingBridge;
 
     public ExpenseResponseDTO createExpense(ExpenseRequestDTO requestDTO, String location) {
@@ -152,6 +155,7 @@ public class ExpenseService {
             throw new RuntimeException("Expense not found with id: " + id);
         }
         loanLedgerService.deleteRepaymentByExpenseId(expense.getId());
+        receivableLedgerService.deleteDisbursementByExpenseId(expense.getId());
         expenseAccountingBridge.voidExpenseMoneyLines(expense, "expense deleted");
         log.info("expense_delete location={} id={} amount={} date={}",
                 expense.getLocation(), expense.getId(), expense.getAmount(), expense.getDate());
@@ -248,7 +252,8 @@ public class ExpenseService {
         }
         if (dto != null && dto.getCategory() != null) {
             String c = dto.getCategory().trim().toLowerCase();
-            if ("loan_repayment".equals(c) || "loan_repay".equals(c) || "loan".equals(c) || "market_loan".equals(c)) {
+            if ("loan_repayment".equals(c) || "loan_repay".equals(c) || "loan_given".equals(c)
+                    || "loan_outflow".equals(c) || "loan".equals(c) || "market_loan".equals(c)) {
                 return ExpenseCategory.LOAN;
             }
         }

@@ -17,7 +17,7 @@ public enum ExpenseCategory {
             case "SALARY" -> SALARY;
             case "INVENTORY" -> INVENTORY;
             case "LOAN" -> LOAN;
-            case "LOAN_REPAYMENT" -> LOAN;
+            case "LOAN_REPAYMENT", "LOAN_GIVEN", "LOAN_OUTFLOW" -> LOAN;
             default -> MISC;
         };
     }

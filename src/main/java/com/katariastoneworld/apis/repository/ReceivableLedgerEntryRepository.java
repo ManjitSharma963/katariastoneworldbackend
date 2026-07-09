@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 public interface ReceivableLedgerEntryRepository extends JpaRepository<ReceivableLedgerEntry, Long> {
 
@@ -23,4 +24,6 @@ public interface ReceivableLedgerEntryRepository extends JpaRepository<Receivabl
             @Param("location") String location,
             @Param("borrowerId") Long borrowerId,
             @Param("type") ReceivableLedgerEntryType type);
+
+    Optional<ReceivableLedgerEntry> findByExpenseId(Long expenseId);
 }

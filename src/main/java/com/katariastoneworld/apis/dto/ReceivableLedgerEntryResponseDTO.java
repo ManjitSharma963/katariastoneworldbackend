@@ -18,5 +18,6 @@ public class ReceivableLedgerEntryResponseDTO {
     private LocalDate entryDate;
     private String notes;
     private String paymentMode;
+    private Long expenseId;
     private LocalDateTime createdAt;
 }

@@ -17,6 +17,8 @@ import com.katariastoneworld.apis.entity.MoneyReferenceType;
 import com.katariastoneworld.apis.entity.ReferenceType;
 import com.katariastoneworld.apis.service.FinancialLedgerService;
 import com.katariastoneworld.apis.service.LoanLedgerService;
+import com.katariastoneworld.apis.service.ReceivableLedgerService;
+import com.katariastoneworld.apis.repository.ReceivableLedgerEntryRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -40,6 +42,9 @@ public class ExpenseAccountingBridge {
     @Autowired
     private LoanLedgerService loanLedgerService;
 
+    @Autowired
+    private ReceivableLedgerEntryRepository receivableLedgerEntryRepository;
+
     public void syncExpenseLedger(Expense expense) {
         if (expense == null || expense.getId() == null || expense.getAmount() == null) {
             return;
@@ -55,6 +60,12 @@ public class ExpenseAccountingBridge {
         if (loanLedgerService.isSyncedLoanRepaymentExpense(expense)
                 && loanLedgerService.hasRepaymentLedgerRowForExpense(expense.getId())) {
             voidExpenseCategoryOnly(expense, "loan repayment expense; EXPENSE line suppressed");
+            financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
+            return;
+        }
+        if (ReceivableLedgerService.isSyncedLoanGivenExpense(expense)
+                && receivableLedgerEntryRepository.findByExpenseId(expense.getId()).isPresent()) {
+            voidExpenseCategoryOnly(expense, "loan given expense; EXPENSE line suppressed");
             financialLedgerService.removeLegacyFinancialTransaction("EXPENSE_DEBIT", String.valueOf(expense.getId()));
             return;
         }
