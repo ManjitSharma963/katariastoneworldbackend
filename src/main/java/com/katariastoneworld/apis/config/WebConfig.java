@@ -17,7 +17,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Value("${cors.allow-all-origins:true}")
     private boolean allowAllOrigins;
     
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,http://68.183.93.217,https://www.katariastoneworld.com}")
+    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001,https://www.katariastoneworld.com,https://katariastoneworld.com}")
     private String allowedOriginsString;
     
     @Override
