@@ -31,7 +31,7 @@ public class OpenApiConfig {
                         .description("""
                                 Comprehensive REST API for managing bills, inventory, customers, employees, 
                                 and expenses for Kataria Stone World. The API supports location-based data 
-                                isolation, JWT authentication, PDF bill generation, and email notifications.
+                                isolation, JWT authentication, and PDF bill generation.
                                 
                                 ## Features
                                 - JWT-based authentication and authorization
@@ -44,7 +44,6 @@ public class OpenApiConfig {
                                 - Category management
                                 - Hero section management
                                 - PDF bill generation
-                                - Email notifications
                                 
                                 ## Authentication
                                 Most endpoints require JWT authentication. Register a user or login to get a token, 

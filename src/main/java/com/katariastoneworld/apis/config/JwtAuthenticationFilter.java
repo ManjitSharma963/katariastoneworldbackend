@@ -124,6 +124,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             normalizedPath.startsWith("/v3/api-docs")) {
             return true;
         }
+
+        // Actuator health — public for load balancers, Railway, and uptime checks
+        if (normalizedPath.equals("/actuator/health") || normalizedPath.startsWith("/actuator/health/")) {
+            return true;
+        }
         
         // For website-products, heroes, categories - only GET requests are public
         // POST/PUT/DELETE on website-products require admin (handled by controller)

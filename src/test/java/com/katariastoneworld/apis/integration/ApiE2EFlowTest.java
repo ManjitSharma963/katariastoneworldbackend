@@ -3,7 +3,6 @@ package com.katariastoneworld.apis.integration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.katariastoneworld.apis.service.BillNumberGeneratorService;
-import com.katariastoneworld.apis.service.EmailService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,9 +35,6 @@ class ApiE2EFlowTest {
 
     @Autowired
     private ObjectMapper objectMapper;
-
-    @MockBean
-    private EmailService emailService;
 
     @MockBean
     private BillNumberGeneratorService billNumberGeneratorService;

@@ -12,7 +12,6 @@ import com.katariastoneworld.apis.entity.BillNonGST;
 import com.katariastoneworld.apis.repository.BillNonGSTRepository;
 import com.katariastoneworld.apis.service.BillNumberGeneratorService;
 import com.katariastoneworld.apis.service.BillService;
-import com.katariastoneworld.apis.service.EmailService;
 import com.katariastoneworld.apis.service.ProductService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,8 +37,6 @@ class BillLifecycleIntegrationTest {
     @Autowired
     private BillNonGSTRepository billNonGSTRepository;
 
-    @MockBean
-    private EmailService emailService;
     @MockBean
     private BillNumberGeneratorService billNumberGeneratorService;
 

@@ -166,9 +166,6 @@ public class BillService {
     private ProductService productService;
 
     @Autowired
-    private EmailService emailService;
-
-    @Autowired
     private BillPaymentRepository billPaymentRepository;
 
     @Autowired
@@ -600,11 +597,6 @@ public class BillService {
                 java.util.Map.of("advanceApplied", advanceApplied.toPlainString()));
         recordBillEvent(BillKind.GST, bill.getId(), BillEventType.PAYMENT_ADJUSTED, currentBillVersionRowId, opLinkedGroupId, actorUserId,
                 java.util.Map.of("totalPaid", totalPaid.toPlainString()));
-        if (oldCustomer != null && oldCustomer.getEmail() != null && !oldCustomer.getEmail().isBlank()) {
-            emailService.sendBillEmail(response, oldCustomer.getEmail());
-        } else if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
-            emailService.sendBillEmail(response, customer.getEmail());
-        }
         return response;
     }
 
@@ -872,11 +864,6 @@ public class BillService {
             recordBillEvent(BillKind.NON_GST, bill.getId(), BillEventType.STORE_CREDIT_CREATED, currentBillVersionRowId, opLinkedGroupId, actorUserId,
                     java.util.Map.of("amount", storeCredited.toPlainString()));
         }
-        if (oldCustomer != null && oldCustomer.getEmail() != null && !oldCustomer.getEmail().isBlank()) {
-            emailService.sendBillEmail(response, oldCustomer.getEmail());
-        } else if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
-            emailService.sendBillEmail(response, customer.getEmail());
-        }
         return response;
     }
 
@@ -1086,8 +1073,6 @@ public class BillService {
                 || (billRequestDTO.getTaxPercentage() != null && billRequestDTO.getTaxPercentage() == 0);
         responseDTO.setSimpleBill(isSimpleBill);
 
-        // Send email to customer asynchronously (non-blocking)
-        emailService.sendBillEmail(responseDTO, customer.getEmail());
         finalizeBillVersionSnapshot(currentBillVersionRowId, responseDTO);
         log.info("bill_create_success kind=GST billId={} billNo={} total={} paid={} advance={}",
                 savedBill.getId(), savedBill.getBillNumber(), totalAmount, totalPaidCash, advanceApplied);
@@ -1270,8 +1255,6 @@ public class BillService {
                 || (billRequestDTO.getTaxPercentage() != null && billRequestDTO.getTaxPercentage() == 0);
         responseDTO.setSimpleBill(isSimpleBill);
 
-        // Send email to customer asynchronously (non-blocking)
-        emailService.sendBillEmail(responseDTO, customer.getEmail());
         finalizeBillVersionSnapshot(currentBillVersionRowId, responseDTO);
         log.info("bill_create_success kind=NON_GST billId={} billNo={} total={} paid={} advance={}",
                 savedBill.getId(), savedBill.getBillNumber(), totalAmount, totalPaidCash, advanceApplied);

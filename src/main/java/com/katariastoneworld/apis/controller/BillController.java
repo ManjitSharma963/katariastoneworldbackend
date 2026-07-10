@@ -21,7 +21,6 @@ import com.katariastoneworld.apis.dto.BillRevisionResultDTO;
 import com.katariastoneworld.apis.service.BillCancellationService;
 import com.katariastoneworld.apis.service.BillRevisionService;
 import com.katariastoneworld.apis.service.BillService;
-import com.katariastoneworld.apis.service.EmailService;
 import com.katariastoneworld.apis.service.PdfService;
 import com.katariastoneworld.apis.util.RequestUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -60,9 +59,6 @@ public class BillController {
 
     @Autowired
     private BillCancellationService billCancellationService;
-
-    @Autowired
-    private EmailService emailService;
 
     @Autowired
     private PdfService pdfService;
@@ -202,19 +198,6 @@ public class BillController {
         String location = RequestUtil.getLocationFromRequest(request);
         List<BillResponseDTO> bills = billService.getBillsByMobileNumber(mobileNumber, location);
         return ResponseEntity.ok(bills);
-    }
-
-    @PostMapping("/test-email")
-    @RequiresRole("admin")
-    public ResponseEntity<String> sendTestEmail(
-            @RequestParam(required = false, defaultValue = "manjitsharma963@gmail.com") String email) {
-        try {
-            emailService.sendTestEmail(email);
-            return ResponseEntity.ok("Test email sent successfully to: " + email);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Failed to send test email: " + e.getMessage());
-        }
     }
 
     /**
