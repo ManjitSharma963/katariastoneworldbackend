@@ -125,8 +125,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return true;
         }
 
-        // Actuator health — public for load balancers, Railway, and uptime checks
-        if (normalizedPath.equals("/actuator/health") || normalizedPath.startsWith("/actuator/health/")) {
+        // Health — public for load balancers, Railway, and uptime checks
+        if (normalizedPath.equals("/health")
+                || normalizedPath.equals("/actuator/health")
+                || normalizedPath.startsWith("/actuator/health/")) {
             return true;
         }
         
