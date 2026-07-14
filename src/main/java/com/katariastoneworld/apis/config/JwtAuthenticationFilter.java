@@ -47,25 +47,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     );
     
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return isPublicEndpoint(request.getRequestURI(), request.getMethod());
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) 
             throws ServletException, IOException {
-        
-        String requestPath = request.getRequestURI();
-        String method = request.getMethod();
-        
-        // Always allow OPTIONS requests (CORS preflight) - they don't need authentication
-        if ("OPTIONS".equalsIgnoreCase(method)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        
-        // Skip authentication for public endpoints (only GET requests for inventory/heroes/categories)
-        if (isPublicEndpoint(requestPath, method)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        
-        // Extract token from Authorization header
         String token = extractTokenFromRequest(request);
         
         if (token == null) {
@@ -105,6 +93,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (path == null) {
             return false;
         }
+
+        // Always allow OPTIONS requests (CORS preflight)
+        if ("OPTIONS".equalsIgnoreCase(method)) {
+            return true;
+        }
+
         // Normalize path (remove trailing slash, handle query params)
         String pathWithoutQuery = path.split("\\?")[0];
         final String normalizedPath;
@@ -130,6 +124,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || normalizedPath.equals("/actuator/health")
                 || normalizedPath.startsWith("/actuator/health/")) {
             return true;
+        }
+
+        // React inventory UI static assets (served from /inventory/)
+        if (normalizedPath.equals("/inventory") || normalizedPath.startsWith("/inventory/")) {
+            return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
         }
         
         // For website-products, heroes, categories - only GET requests are public

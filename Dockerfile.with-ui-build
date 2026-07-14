@@ -1,4 +1,20 @@
-# Spring Boot API + embedded React inventory UI at /inventory/
+# Multi-stage build including UI from ui/ source (run scripts/sync-ui-source.ps1 first).
+FROM node:20-alpine AS ui-build
+
+WORKDIR /ui
+
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+COPY ui/public ./public
+COPY ui/src ./src
+COPY ui/.env.production ./
+
+ENV CI=true
+ENV REACT_APP_API_URL=https://api.katariastoneworld.com
+
+RUN npm run build
+
 FROM maven:3.9-eclipse-temurin-17-alpine AS build
 
 WORKDIR /app
@@ -7,6 +23,8 @@ COPY pom.xml .
 RUN mvn -B dependency:go-offline -DskipTests
 
 COPY src ./src
+COPY --from=ui-build /ui/build ./src/main/resources/static/inventory
+
 RUN mvn -B -DskipTests clean package
 
 FROM eclipse-temurin:17-jre-alpine

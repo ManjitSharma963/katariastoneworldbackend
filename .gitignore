@@ -2,6 +2,7 @@ target/
 *.class
 *.jar
 *.log
+ui/node_modules/
 
 # Local secrets — never commit
 .env
